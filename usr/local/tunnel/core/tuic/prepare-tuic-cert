@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+
+require_root
+load_tunnel_config
+
+mkdir -p /etc/tuic
+domain="$(get_domain || true)"
+
+if [ -f /etc/xray/xray.crt ] && [ -f /etc/xray/xray.key ]; then
+  cp -f /etc/xray/xray.crt /etc/tuic/server.crt
+  cp -f /etc/xray/xray.key /etc/tuic/server.key
+else
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -subj "/CN=${domain:-tuic}" \
+    -keyout /etc/tuic/server.key \
+    -out /etc/tuic/server.crt >/dev/null 2>&1
+fi
+
+chmod 644 /etc/tuic/server.crt
+chmod 600 /etc/tuic/server.key
+print_ok "Certificate TUIC siap"

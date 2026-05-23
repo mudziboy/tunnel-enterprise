@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+mkdir -p /etc/tunnel
+cat > /etc/tunnel/banner.txt <<'EOF'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        ████████╗ ██████╗  ██████╗
+        ╚══██╔══╝██╔════╝ ██╔═══██╗
+           ██║   ██║  ███╗██║   ██║
+           ██║   ██║   ██║██║   ██║
+           ██║   ╚██████╔╝╚██████╔╝
+           ╚═╝    ╚═════╝  ╚═════╝
+
+              T U N N E L   G O
+      PREMIUM CYBER ENTERPRISE VPN SERVICE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Secure Access • Fast Tunnel • Managed Core
+  Brand       : TUNNEL GO
+  Support     : Tunnel Official
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EOF
+cp -f /etc/tunnel/banner.txt /etc/issue.net
+chmod 644 /etc/tunnel/banner.txt /etc/issue.net
+echo "Banner TUNNEL GO berhasil dipasang"

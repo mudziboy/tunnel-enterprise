@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+DB=/etc/tunnel/tunnel.db
+[ -f /usr/local/tunnel/lib/database ] && . /usr/local/tunnel/lib/database && db_init >/dev/null 2>&1 || true
+cpu_load="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
+cores="$(nproc 2>/dev/null || echo 1)"
+cpu_pct="$(awk -v l="$cpu_load" -v c="$cores" 'BEGIN{printf "%.0f", (l/c)*100}')"
+ram_pct="$(free 2>/dev/null | awk 'NR==2{printf "%.0f", ($3/$2)*100}' || echo 0)"
+disk_pct="$(df / 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}' || echo 0)"
+active_accounts="$(sqlite3 "$DB" "SELECT COUNT(*) FROM accounts WHERE status IN ('active','trial');" 2>/dev/null || echo 0)"
+max_accounts="$(jq -r '.max_accounts // 500' /etc/tunnel/node.json 2>/dev/null || echo 500)"
+acct_pct="$(awk -v a="$active_accounts" -v m="$max_accounts" 'BEGIN{if(m<=0)m=500; printf "%.0f", (a/m)*100}')"
+score="$(awk -v c="$cpu_pct" -v r="$ram_pct" -v d="$disk_pct" -v a="$acct_pct" 'BEGIN{s=100-(c*.30)-(r*.25)-(d*.15)-(a*.30); if(s<0)s=0; if(s>100)s=100; printf "%.0f", s}')"
+rec=false; [ "$score" -ge 70 ] && rec=true
+cat <<EOF
+{"capacity_score":$score,"recommended":$rec,"cpu_usage":$cpu_pct,"ram_usage":$ram_pct,"disk_usage":$disk_pct,"active_accounts":$active_accounts,"max_accounts":$max_accounts,"checked_at":"$(date -Iseconds)"}
+EOF

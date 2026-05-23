@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+
+require_root
+
+services=(ssh dropbear tunnel-ws-proxy nginx haproxy vmess@config vless@config trojan@config shadowsocks@config zivpn sing-box hysteria2 tuic wg-quick@wg0 openvpn-server@tunnel-tcp openvpn-server@tunnel-udp)
+
+for svc in "${services[@]}"; do
+  if systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
+    if ! systemctl is-active --quiet "$svc"; then
+      systemctl restart "$svc" >/dev/null 2>&1 || true
+    fi
+  fi
+done
+
+/usr/local/tunnel/proxy/haproxy/render-haproxy-config >/dev/null 2>&1 || true
+/usr/local/tunnel/proxy/nginx/render-nginx-config >/dev/null 2>&1 || true
+/usr/local/tunnel/core/zivpn/apply-zivpn-firewall >/dev/null 2>&1 || true
+
+print_ok "Repair routine selesai"

@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/dependencies
+. /usr/local/tunnel/lib/database
+
+require_root
+load_tunnel_config
+db_init
+
+install_packages curl wget openssl iptables
+
+ZIVPN_VERSION="${ZIVPN_VERSION:-udp-zivpn_1.4.9}"
+ZIVPN_DIR="/etc/zivpn"
+ZIVPN_BIN="/usr/local/bin/zivpn"
+ZIVPN_CFG="$ZIVPN_DIR/config.json"
+ZIVPN_PORT="${ZIVPN_PORT:-5667}"
+
+mkdir -p "$ZIVPN_DIR" /etc/tunnel/users/zivpn /etc/tunnel/runtime/zivpn
+chmod 755 "$ZIVPN_DIR"
+
+domain="$(get_domain || true)"
+cert_ready=0
+
+if [ -f /etc/xray/xray.crt ] && [ -f /etc/xray/xray.key ]; then
+  cp -f /etc/xray/xray.crt "$ZIVPN_DIR/zivpn.crt"
+  cp -f /etc/xray/xray.key "$ZIVPN_DIR/zivpn.key"
+  cert_ready=1
+elif [ -n "$domain" ] && [ -f "/root/.acme.sh/${domain}/fullchain.cer" ] && [ -f "/root/.acme.sh/${domain}/${domain}.key" ]; then
+  cp -f "/root/.acme.sh/${domain}/fullchain.cer" "$ZIVPN_DIR/zivpn.crt"
+  cp -f "/root/.acme.sh/${domain}/${domain}.key" "$ZIVPN_DIR/zivpn.key"
+  cert_ready=1
+elif [ -n "$domain" ] && [ -f "/root/.acme.sh/${domain}_ecc/fullchain.cer" ] && [ -f "/root/.acme.sh/${domain}_ecc/${domain}.key" ]; then
+  cp -f "/root/.acme.sh/${domain}_ecc/fullchain.cer" "$ZIVPN_DIR/zivpn.crt"
+  cp -f "/root/.acme.sh/${domain}_ecc/${domain}.key" "$ZIVPN_DIR/zivpn.key"
+  cert_ready=1
+fi
+
+if [ "$cert_ready" -eq 0 ]; then
+  openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
+    -subj "/CN=${domain:-zivpn}" \
+    -keyout "$ZIVPN_DIR/zivpn.key" \
+    -out "$ZIVPN_DIR/zivpn.crt" >/dev/null 2>&1
+fi
+
+chmod 644 "$ZIVPN_DIR/zivpn.crt"
+chmod 600 "$ZIVPN_DIR/zivpn.key"
+
+if [ ! -f "$ZIVPN_CFG" ]; then
+  /usr/local/tunnel/core/zivpn/render-zivpn-config
+fi
+
+arch="$(uname -m)"
+case "$arch" in
+  x86_64) binary="udp-zivpn-linux-amd64" ;;
+  aarch64|arm64) binary="udp-zivpn-linux-arm64" ;;
+  armv7l|armv7) binary="udp-zivpn-linux-arm7" ;;
+  *) print_err "Arsitektur tidak didukung: $arch"; exit 1 ;;
+esac
+
+url="https://github.com/zahidbd2/udp-zivpn/releases/download/${ZIVPN_VERSION}/${binary}"
+tmp="$(mktemp /tmp/zivpn.XXXXXX)"
+trap 'rm -f "$tmp"' EXIT
+
+if [ ! -x "$ZIVPN_BIN" ]; then
+  wget -q -T 30 -O "$tmp" "$url"
+  install -m 0755 "$tmp" "$ZIVPN_BIN"
+fi
+
+cat > /etc/systemd/system/zivpn.service <<EOF
+[Unit]
+Description=ZiVPN UDP Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+WorkingDirectory=$ZIVPN_DIR
+ExecStart=$ZIVPN_BIN server -c $ZIVPN_CFG
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/sysctl.d/99-tunnel-zivpn.conf <<'EOF'
+net.ipv4.ip_forward=1
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.core.rmem_default=16777216
+net.core.wmem_default=16777216
+net.core.netdev_max_backlog=16384
+net.ipv4.udp_mem=65536 131072 262144
+net.ipv4.udp_rmem_min=8192
+net.ipv4.udp_wmem_min=8192
+EOF
+
+sysctl --system >/dev/null 2>&1 || true
+
+/usr/local/tunnel/core/zivpn/apply-zivpn-firewall
+
+systemctl daemon-reload
+systemctl enable zivpn >/dev/null 2>&1
+systemctl restart zivpn
+
+print_ok "ZiVPN siap di UDP $ZIVPN_PORT"

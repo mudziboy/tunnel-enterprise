@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+while true; do
+  clear
+  echo "WireGuard Manager"
+  echo "1. Install WireGuard"
+  echo "2. Render Config"
+  echo "3. Restart WireGuard"
+  echo "4. Status WireGuard"
+  echo "5. Show Server Public Key"
+  echo "6. Back"
+  read -rp "Pilih menu: " opt
+  case "$opt" in
+    1) /usr/local/tunnel/core/wireguard/install-wireguard ;;
+    2) /usr/local/tunnel/core/wireguard/render-wireguard-config ;;
+    3) systemctl restart wg-quick@wg0 ;;
+    4) systemctl status wg-quick@wg0 --no-pager ;;
+    5) cat /etc/wireguard/server_public.key 2>/dev/null || true ;;
+    6) exit 0 ;;
+    *) echo "Pilihan tidak valid" ;;
+  esac
+  read -rp "Enter untuk kembali..." _
+done

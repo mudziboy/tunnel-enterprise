@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+TUNNEL_DB="${TUNNEL_DB:-/etc/tunnel/tunnel.db}"
+esc(){ db_escape "$1"; }
+init(){ db_init >/dev/null 2>&1; /usr/local/tunnel/core/udp-port-mapper auto-from-accounts >/dev/null 2>&1 || true; }
+backend(){ local b; b="$(sqlite3 "$TUNNEL_DB" "SELECT value FROM settings WHERE key='udp_accounting_backend';" 2>/dev/null || true)"; [ -n "$b" ] && echo "$b" || /usr/local/tunnel/core/accounting-backend-detect 2>/dev/null || echo none; }
+record(){
+  local user="$1" proto="$2" key="$3" rx="$4" tx="$5" start="$6" end="$7" old old_rx old_tx rxd txd
+  old="$(sqlite3 -separator '|' "$TUNNEL_DB" "SELECT rx_bytes,tx_bytes FROM udp_counter_state WHERE counter_key='$(esc "$key")';" 2>/dev/null || true)"
+  if [ -n "$old" ]; then
+    old_rx="${old%%|*}"; old_tx="${old##*|}"
+    rxd=$(( rx - old_rx )); txd=$(( tx - old_tx ))
+    [ "$rxd" -lt 0 ] && rxd=0; [ "$txd" -lt 0 ] && txd=0
+  else
+    rxd=0; txd=0
+  fi
+  sqlite3 "$TUNNEL_DB" "INSERT OR REPLACE INTO udp_counter_state(counter_key,username,protocol,rx_bytes,tx_bytes,updated_at) VALUES('$(esc "$key")','$(esc "$user")','$(esc "$proto")',$rx,$tx,CURRENT_TIMESTAMP); INSERT INTO udp_accounting_snapshots(username,protocol,backend,start_port,end_port,rx_bytes,tx_bytes,rx_delta,tx_delta) VALUES('$(esc "$user")','$(esc "$proto")','$(esc "$(backend)")',$start,$end,$rx,$tx,$rxd,$txd); INSERT INTO traffic_usage(username,protocol,uplink_bytes,downlink_bytes,source) VALUES('$(esc "$user")','$(esc "$proto")',$txd,$rxd,'udp-accounting:$key');"
+}
+collect_nft(){
+  command -v nft >/dev/null 2>&1 || return 1
+  local list; list="$(nft -a list table inet tunnelgo_udp 2>/dev/null || true)"
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT username,protocol,start_port,end_port FROM udp_port_rules WHERE status='active';" | while IFS='|' read -r user proto start end; do
+    [ -n "$user" ] || continue
+    label="${user}:${proto}:${start}-${end}"
+    rx="$(printf '%s
+' "$list" | awk -v c="tg_udp_rx:$label" '$0 ~ c {for(i=1;i<=NF;i++) if($i=="bytes") {print $(i+1); exit}}')"
+    tx="$(printf '%s
+' "$list" | awk -v c="tg_udp_tx:$label" '$0 ~ c {for(i=1;i<=NF;i++) if($i=="bytes") {print $(i+1); exit}}')"
+    record "$user" "$proto" "udp:$label" "${rx:-0}" "${tx:-0}" "$start" "$end"
+  done
+}
+collect_iptables(){
+  command -v iptables >/dev/null 2>&1 || return 1
+  local in out; in="$(iptables -L TUNNELGO_UDP_IN -v -x -n 2>/dev/null || true)"; out="$(iptables -L TUNNELGO_UDP_OUT -v -x -n 2>/dev/null || true)"
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT username,protocol,start_port,end_port FROM udp_port_rules WHERE status='active';" | while IFS='|' read -r user proto start end; do
+    [ -n "$user" ] || continue
+    label="tg_udp:${user}:${proto}:${start}-${end}"
+    rx="$(printf '%s
+' "$in" | awk -v c="rx:$label" '$0 ~ c {print $2; exit}')"
+    tx="$(printf '%s
+' "$out" | awk -v c="tx:$label" '$0 ~ c {print $2; exit}')"
+    record "$user" "$proto" "udp:$label" "${rx:-0}" "${tx:-0}" "$start" "$end"
+  done
+}
+init
+case "$(backend)" in
+  nft) collect_nft || true ;;
+  iptables) collect_iptables || true ;;
+  *) true ;;
+esac
+case "${1:-table}" in
+  --json|json) sqlite3 -json "$TUNNEL_DB" "SELECT username,protocol,SUM(rx_delta) rx_bytes,SUM(tx_delta) tx_bytes,SUM(rx_delta+tx_delta) total_bytes FROM udp_accounting_snapshots GROUP BY username,protocol ORDER BY total_bytes DESC LIMIT 200;" ;;
+  *) sqlite3 -header -column "$TUNNEL_DB" "SELECT username,protocol,ROUND(SUM(rx_delta+tx_delta)/1024.0/1024.0,2) mb FROM udp_accounting_snapshots GROUP BY username,protocol ORDER BY mb DESC LIMIT 50;" ;;
+esac

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/account
+
+account_init
+sqlite3 -header -column "$TUNNEL_DB" "SELECT username, password, ip_limit, expired_at, status FROM accounts WHERE protocol='zivpn' ORDER BY username;"

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+username="${1:-trial-$(date +%H%M%S)}"
+minutes="${2:-60}"
+password="${4:-$(tr -dc A-Za-z0-9 </dev/urandom | head -c 10)}"
+
+useradd -M -N -s /bin/false "$username" 2>/dev/null || true
+echo "$username:$password" | chpasswd
+mkdir -p /etc/tunnel/users/ssh
+printf '%s\n' "$minutes" > "/etc/tunnel/users/ssh/$username.trial-minutes"
+
+( sleep "$((minutes * 60))"; pkill -u "$username" 2>/dev/null || true; userdel "$username" 2>/dev/null || true; rm -f "/etc/tunnel/users/ssh/$username."* ) >/dev/null 2>&1 &
+
+echo "Trial SSH siap"
+echo "Username: $username"
+echo "Password: $password"
+echo "Durasi  : $minutes menit"

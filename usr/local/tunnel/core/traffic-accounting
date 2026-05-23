@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+db_init >/dev/null 2>&1
+/usr/local/tunnel/core/accounting-collector --json >/dev/null 2>&1 || true
+sql(){ sqlite3 "$TUNNEL_DB" "$1" 2>/dev/null || true; }
+esc(){ db_escape "$1"; }
+record_counter(){
+  local u="$1" p="$2" key="$3" rx="${4:-0}" tx="${5:-0}" old rx_delta tx_delta
+  [ -n "$u" ] && [ -n "$p" ] && [ -n "$key" ] || return 0
+  old="$(sqlite3 -separator '|' "$TUNNEL_DB" "SELECT rx_bytes,tx_bytes FROM traffic_counters WHERE username='$(esc "$u")' AND protocol='$(esc "$p")' AND counter_key='$(esc "$key")';" 2>/dev/null || true)"
+  if [ -n "$old" ]; then
+    old_rx="${old%%|*}"; old_tx="${old##*|}"
+    rx_delta=$(( rx - old_rx )); tx_delta=$(( tx - old_tx ))
+    [ "$rx_delta" -lt 0 ] && rx_delta=0
+    [ "$tx_delta" -lt 0 ] && tx_delta=0
+    [ "$rx_delta" -gt 0 ] || [ "$tx_delta" -gt 0 ] && sql "INSERT INTO traffic_usage(username,protocol,uplink_bytes,downlink_bytes,source) VALUES('$(esc "$u")','$(esc "$p")',$tx_delta,$rx_delta,'delta:$key'); INSERT INTO traffic_logs(username,protocol,uplink_bytes,downlink_bytes,source) VALUES('$(esc "$u")','$(esc "$p")',$tx_delta,$rx_delta,'delta:$key');"
+  else
+    sql "INSERT INTO traffic_usage(username,protocol,uplink_bytes,downlink_bytes,source) VALUES('$(esc "$u")','$(esc "$p")',0,0,'baseline:$key');"
+  fi
+  sql "INSERT OR REPLACE INTO traffic_counters(username,protocol,counter_key,rx_bytes,tx_bytes,updated_at) VALUES('$(esc "$u")','$(esc "$p")','$(esc "$key")',$rx,$tx,CURRENT_TIMESTAMP);"
+}
+collect_wireguard(){
+  command -v wg >/dev/null 2>&1 || return 0
+  wg show all transfer 2>/dev/null | while read -r peer rx tx; do
+    [ -n "${peer:-}" ] || continue
+    record_counter "wg:$peer" wireguard "$peer" "${rx:-0}" "${tx:-0}"
+  done
+}
+collect_xray_stats(){
+  command -v xray >/dev/null 2>&1 || return 0
+  if command -v xray >/dev/null 2>&1 && xray api statsquery --server=127.0.0.1:10085 >/tmp/tunnel-xray-stats.$$ 2>/dev/null; then
+    awk '/user>>>/ {print}' /tmp/tunnel-xray-stats.$$ | while read -r line; do
+      name="$(printf '%s' "$line" | sed -n 's/.*user>>>\([^>]*\)>>>traffic>>>\(uplink\|downlink\).*/\1/p')"
+      dir="$(printf '%s' "$line" | sed -n 's/.*traffic>>>\(uplink\|downlink\).*/\1/p')"
+      val="$(printf '%s' "$line" | grep -Eo 'value: *[0-9]+' | awk '{print $2}')"
+      [ -n "$name" ] && [ -n "$dir" ] && [ -n "$val" ] || continue
+      key="xray:$name"
+      if [ "$dir" = "downlink" ]; then record_counter "$name" xray "$key:down" "$val" 0; else record_counter "$name" xray "$key:up" 0 "$val"; fi
+    done
+    rm -f /tmp/tunnel-xray-stats.$$
+  fi
+}
+collect_vnstat_node(){
+  command -v vnstat >/dev/null 2>&1 || return 0
+  iface="$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')"
+  [ -n "$iface" ] || return 0
+  line="$(vnstat --oneline b -i "$iface" 2>/dev/null || true)"
+  rx="$(printf '%s' "$line" | awk -F';' '{print $13}' | tr -dc 0-9)"
+  tx="$(printf '%s' "$line" | awk -F';' '{print $14}' | tr -dc 0-9)"
+  [ -n "$rx" ] && [ -n "$tx" ] && record_counter "__node__" node "$iface" "$rx" "$tx"
+}
+collect_wireguard
+collect_xray_stats
+collect_vnstat_node
+case "${1:-table}" in
+  --json|json) sqlite3 -json "$TUNNEL_DB" "SELECT username,protocol,SUM(uplink_bytes) uplink_bytes,SUM(downlink_bytes) downlink_bytes,SUM(uplink_bytes+downlink_bytes) total_bytes FROM traffic_usage GROUP BY username,protocol ORDER BY total_bytes DESC LIMIT 200;" ;;
+  *) sqlite3 -header -column "$TUNNEL_DB" "SELECT username,protocol,ROUND(SUM(uplink_bytes+downlink_bytes)/1024.0/1024.0,2) mb FROM traffic_usage GROUP BY username,protocol ORDER BY mb DESC LIMIT 50;" ;;
+esac

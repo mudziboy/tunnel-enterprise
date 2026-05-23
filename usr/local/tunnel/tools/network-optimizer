@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+LOG=/usr/local/tunnel/logs/network-optimizer.log
+mkdir -p /usr/local/tunnel/logs
+exec > >(tee -a "$LOG") 2>&1
+[ "$(id -u)" -eq 0 ] || { echo "Jalankan sebagai root" >&2; exit 1; }
+echo "[$(date '+%F %T')] TUNNEL GO Network Optimizer"
+/usr/local/tunnel/tools/bbr.sh
+if command -v sysctl >/dev/null 2>&1; then
+  cat > /etc/sysctl.d/98-tunnel-go-conntrack.conf <<'EOF'
+net.netfilter.nf_conntrack_max=262144
+EOF
+  sysctl -w net.netfilter.nf_conntrack_max=262144 >/dev/null 2>&1 || true
+fi
+# MSS clamp untuk mengurangi problem MTU pada beberapa operator.
+if command -v iptables >/dev/null 2>&1; then
+  iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+  iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+fi
+systemctl daemon-reexec >/dev/null 2>&1 || true
+echo "Optimizer selesai. Reboot disarankan jika kernel BBR belum aktif."

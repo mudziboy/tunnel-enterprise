@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+
+require_root
+
+backup_dir="/etc/tunnel/backups"
+mkdir -p "$backup_dir"
+file="$backup_dir/tunnel-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+manifest="/etc/tunnel/runtime/backup-manifest.txt"
+
+mkdir -p /etc/tunnel/runtime
+
+{
+  echo "created_at=$(date '+%Y-%m-%d %H:%M:%S')"
+  echo "hostname=$(hostname)"
+  echo "file=$file"
+} > "$manifest"
+
+tar -czf "$file" \
+  --warning=no-file-changed \
+  /etc/tunnel \
+  /usr/local/tunnel \
+  /etc/xray \
+  /etc/zivpn \
+  /etc/openvpn \
+  /etc/wireguard \
+  /etc/haproxy \
+  /etc/nginx/conf.d \
+  /etc/systemd/system 2>/dev/null || true
+
+chmod 600 "$file"
+echo "$file"

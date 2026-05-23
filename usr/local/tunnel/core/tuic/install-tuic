@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/dependencies
+
+require_root
+load_tunnel_config
+install_packages curl unzip openssl
+
+arch="$(uname -m)"
+case "$arch" in
+  x86_64) asset="x86_64-unknown-linux-gnu" ;;
+  aarch64|arm64) asset="aarch64-unknown-linux-gnu" ;;
+  *) print_err "Arsitektur TUIC belum didukung: $arch"; exit 1 ;;
+esac
+
+version="${TUIC_VERSION:-}"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+if [ -z "$version" ]; then
+  version="$(curl -fsSL https://api.github.com/repos/EAimTY/tuic/releases/latest | jq -r '.tag_name')"
+fi
+
+url="$(curl -fsSL https://api.github.com/repos/EAimTY/tuic/releases/tags/$version | jq -r ".assets[].browser_download_url" | grep "$asset" | grep -E 'server|tuic' | head -n1)"
+
+if [ -z "$url" ]; then
+  print_err "Asset TUIC tidak ditemukan"
+  exit 1
+fi
+
+curl -fL "$url" -o "$tmpdir/tuic.bin"
+install -m 0755 "$tmpdir/tuic.bin" /usr/local/bin/tuic-server
+
+mkdir -p /etc/tuic /etc/tunnel/runtime/tuic
+/usr/local/tunnel/core/tuic/prepare-tuic-cert
+/usr/local/tunnel/core/tuic/render-tuic-config
+
+cat > /etc/systemd/system/tuic.service <<'EOF'
+[Unit]
+Description=TUIC Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+ExecStart=/usr/local/bin/tuic-server -c /etc/tuic/config.json
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable tuic >/dev/null 2>&1
+systemctl restart tuic
+
+print_ok "TUIC siap"

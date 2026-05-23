@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+PORTS=/etc/tunnel/ports.env
+[ -f "$PORTS" ] || touch "$PORTS"
+case "${1:-list}" in
+  list) cat "$PORTS";;
+  get) grep -E "^${2:?KEY}=" "$PORTS" | tail -n1 | cut -d= -f2- | tr -d '"';;
+  set)
+    key="${2:?KEY}"; val="${3:?VALUE}"
+    if grep -qE "^${key}=" "$PORTS"; then sed -i "s|^${key}=.*|${key}=\"${val}\"|" "$PORTS"; else echo "${key}=\"${val}\"" >> "$PORTS"; fi
+    echo "Updated $key=$val";;
+  check)
+    . "$PORTS" || true
+    ss -lntup 2>/dev/null || true
+    ;;
+  *) echo "Usage: port-manager list|get KEY|set KEY VALUE|check"; exit 1;;
+esac

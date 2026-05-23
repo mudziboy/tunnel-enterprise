@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+printf '=== Sessions ===\n'
+/usr/local/tunnel/core/session-monitor || true
+printf '\n=== Traffic ===\n'
+/usr/local/tunnel/core/traffic-accounting || true
+printf '\n=== Quota ===\n'
+/usr/local/tunnel/core/quota-manager || true
+printf '\n=== IP Limit ===\n'
+/usr/local/tunnel/core/ip-limit-enforcer || true

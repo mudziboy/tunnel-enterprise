@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+username="${1:-}"
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+
+[ -n "$username" ] || read -rp "Username ZiVPN: " username
+require_valid_username "$username"
+
+if db_account_exists "$username" "zivpn"; then
+  account_id="$(db_account_id "$username" "zivpn")"
+  db_log_event "$account_id" "$username" "zivpn" "delete" ""
+  db_delete_account "$username" "zivpn"
+fi
+
+rm -f "/etc/tunnel/users/zivpn/$username."*
+/usr/local/tunnel/core/zivpn/render-zivpn-config
+echo "ZiVPN user dihapus: $username"

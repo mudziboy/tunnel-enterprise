@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+TUNNEL_ACCOUNTING_LOG="${TUNNEL_ACCOUNTING_LOG:-/usr/local/tunnel/logs/accounting.log}"
+mkdir -p "$(dirname "$TUNNEL_ACCOUNTING_LOG")"
+log(){ printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$TUNNEL_ACCOUNTING_LOG"; }
+esc(){ db_escape "$1"; }
+db_init >/dev/null 2>&1
+record_delta(){
+  local user="$1" proto="$2" backend="$3" key="$4" rx="$5" tx="$6" old old_rx old_tx rx_delta tx_delta
+  old="$(sqlite3 -separator '|' "$TUNNEL_DB" "SELECT rx_bytes,tx_bytes FROM traffic_counters WHERE username='$(esc "$user")' AND protocol='$(esc "$proto")' AND counter_key='$(esc "$key")';" 2>/dev/null || true)"
+  if [ -n "$old" ]; then
+    old_rx="${old%%|*}"; old_tx="${old##*|}"
+    rx_delta=$(( rx - old_rx )); tx_delta=$(( tx - old_tx ))
+    [ "$rx_delta" -lt 0 ] && rx_delta=0
+    [ "$tx_delta" -lt 0 ] && tx_delta=0
+    if [ "$rx_delta" -gt 0 ] || [ "$tx_delta" -gt 0 ]; then
+      sqlite3 "$TUNNEL_DB" "INSERT INTO traffic_usage(username,protocol,uplink_bytes,downlink_bytes,source) VALUES('$(esc "$user")','$(esc "$proto")',$rx_delta,$tx_delta,'$backend:$key'); INSERT INTO traffic_logs(username,protocol,uplink_bytes,downlink_bytes,source) VALUES('$(esc "$user")','$(esc "$proto")',$rx_delta,$tx_delta,'$backend:$key'); INSERT INTO accounting_snapshots(username,protocol,backend,counter_key,rx_bytes,tx_bytes,rx_delta,tx_delta) VALUES('$(esc "$user")','$(esc "$proto")','$backend','$(esc "$key")',$rx,$tx,$rx_delta,$tx_delta);" 2>/dev/null || true
+    fi
+  else
+    sqlite3 "$TUNNEL_DB" "INSERT INTO accounting_snapshots(username,protocol,backend,counter_key,rx_bytes,tx_bytes,rx_delta,tx_delta) VALUES('$(esc "$user")','$(esc "$proto")','$backend','$(esc "$key")',$rx,$tx,0,0);" 2>/dev/null || true
+  fi
+  sqlite3 "$TUNNEL_DB" "INSERT OR REPLACE INTO traffic_counters(username,protocol,counter_key,rx_bytes,tx_bytes,updated_at) VALUES('$(esc "$user")','$(esc "$proto")','$(esc "$key")',$rx,$tx,CURRENT_TIMESTAMP); UPDATE accounting_rules SET last_rx_bytes=$rx,last_tx_bytes=$tx,updated_at=CURRENT_TIMESTAMP WHERE counter_key='$(esc "$key")';" 2>/dev/null || true
+}
+collect_nft(){
+  command -v nft >/dev/null 2>&1 || return 0
+  nft -a list chain inet tunnelgo_accounting uid_out 2>/dev/null | while read -r line; do
+    case "$line" in *'comment "tg:'*) :;; *) continue;; esac
+    meta="$(printf '%s\n' "$line" | sed -n 's/.*comment "tg:\([^"]*\)".*/\1/p')"
+    [ -n "$meta" ] || continue
+    user="$(printf '%s' "$meta" | cut -d: -f1)"
+    proto="$(printf '%s' "$meta" | cut -d: -f2)"
+    dir="$(printf '%s' "$meta" | cut -d: -f3)"
+    bytes="$(printf '%s\n' "$line" | sed -n 's/.* counter packets [0-9][0-9]* bytes \([0-9][0-9]*\).*/\1/p')"
+    [ -n "$bytes" ] || bytes=0
+    key="nft:uid:${user}:${proto}:${dir}"
+    if [ "$dir" = "out" ]; then record_delta "$user" "$proto" nft "$key" 0 "$bytes"; else record_delta "$user" "$proto" nft "$key" "$bytes" 0; fi
+  done
+}
+collect_iptables(){
+  command -v iptables >/dev/null 2>&1 || return 0
+  iptables -nvxL TUNNELGO_UID_OUT 2>/dev/null | awk 'NR>2 {print}' | while read -r pkts bytes target prot opt inif outif source dest rest; do
+    [ -n "${bytes:-}" ] || continue
+    meta="$(printf '%s %s %s %s %s %s %s %s %s\n' "$target" "$prot" "$opt" "$inif" "$outif" "$source" "$dest" "$rest" "" | sed -n 's/.*tg:\([^ ]*\).*/\1/p')"
+    [ -n "$meta" ] || continue
+    user="$(printf '%s' "$meta" | cut -d: -f1)"
+    proto="$(printf '%s' "$meta" | cut -d: -f2)"
+    dir="$(printf '%s' "$meta" | cut -d: -f3)"
+    key="iptables:uid:${user}:${proto}:${dir}"
+    if [ "$dir" = "out" ]; then record_delta "$user" "$proto" iptables "$key" 0 "$bytes"; else record_delta "$user" "$proto" iptables "$key" "$bytes" 0; fi
+  done
+}
+collect_nft
+collect_iptables
+sqlite3 "$TUNNEL_DB" "INSERT INTO accounting_events(event,backend,payload) VALUES('collector.completed','hybrid','{}');" 2>/dev/null || true
+case "${1:-table}" in
+  --json|json) sqlite3 -json "$TUNNEL_DB" "SELECT username,protocol,backend,counter_key,rx_bytes,tx_bytes,rx_delta,tx_delta,collected_at FROM accounting_snapshots ORDER BY id DESC LIMIT 200;" ;;
+  *) sqlite3 -header -column "$TUNNEL_DB" "SELECT username,protocol,backend,counter_key,ROUND((rx_bytes+tx_bytes)/1024.0/1024.0,2) total_mb,collected_at FROM accounting_snapshots ORDER BY id DESC LIMIT 50;" ;;
+esac

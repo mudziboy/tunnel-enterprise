@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+db_init >/dev/null 2>&1
+/usr/local/tunnel/core/traffic-accounting >/dev/null 2>&1 || true
+lock_user(){
+  local u="$1" p="$2" quota="$3" used="$4"
+  db_set_account_status "$u" "$p" locked "quota_exceeded:${used}/${quota}"
+  sqlite3 "$TUNNEL_DB" "INSERT INTO quota_logs(username,protocol,quota_gb,used_bytes,action) VALUES('$(db_escape "$u")','$(db_escape "$p")',$quota,$used,'locked');" 2>/dev/null || true
+  db_log_event "" "$u" "$p" "quota_exceeded" "{\"quota_gb\":$quota,\"used_bytes\":$used}"
+  /usr/local/tunnel/core/enforcement-actions apply "$u" "$p" "quota_exceeded" >/dev/null 2>&1 || true
+}
+sqlite3 -separator $'\t' "$TUNNEL_DB" "SELECT a.username,a.protocol,a.quota_gb,COALESCE(SUM(t.uplink_bytes+t.downlink_bytes),0) FROM accounts a LEFT JOIN traffic_usage t ON t.username=a.username AND (t.protocol=a.protocol OR (a.protocol IN ('vmess','vless','trojan','shadowsocks') AND t.protocol='xray')) WHERE a.status IN ('active','trial') AND a.quota_gb>0 GROUP BY a.username,a.protocol,a.quota_gb;" 2>/dev/null | while IFS=$'\t' read -r u p q used; do
+  [ -n "$u" ] || continue
+  limit=$(( q * 1024 * 1024 * 1024 ))
+  [ "${used:-0}" -ge "$limit" ] && lock_user "$u" "$p" "$q" "$used"
+done
+case "${1:-table}" in
+  --json|json) sqlite3 -json "$TUNNEL_DB" "SELECT a.username,a.protocol,a.quota_gb,COALESCE(SUM(t.uplink_bytes+t.downlink_bytes),0) used_bytes FROM accounts a LEFT JOIN traffic_usage t ON t.username=a.username GROUP BY a.username,a.protocol,a.quota_gb;" ;;
+  *) sqlite3 -header -column "$TUNNEL_DB" "SELECT a.username,a.protocol,a.quota_gb,ROUND(COALESCE(SUM(t.uplink_bytes+t.downlink_bytes),0)/1024.0/1024.0/1024.0,2) used_gb,a.status FROM accounts a LEFT JOIN traffic_usage t ON t.username=a.username GROUP BY a.username,a.protocol,a.quota_gb,a.status ORDER BY used_gb DESC;" ;;
+esac

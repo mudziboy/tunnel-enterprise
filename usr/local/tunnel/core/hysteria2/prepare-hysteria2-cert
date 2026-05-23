@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+
+require_root
+load_tunnel_config
+
+mkdir -p /etc/hysteria
+domain="$(get_domain || true)"
+
+if [ -f /etc/tunnel/runtime/haproxy.pem ]; then
+  awk 'BEGIN{key=0;cert=0}/BEGIN CERTIFICATE/{cert=1} cert{print > "/etc/hysteria/server.crt"} /END CERTIFICATE/{cert=0}/BEGIN .*PRIVATE KEY/{key=1} key{print > "/etc/hysteria/server.key"} /END .*PRIVATE KEY/{key=0}' /etc/tunnel/runtime/haproxy.pem
+elif [ -f /etc/xray/xray.crt ] && [ -f /etc/xray/xray.key ]; then
+  cp -f /etc/xray/xray.crt /etc/hysteria/server.crt
+  cp -f /etc/xray/xray.key /etc/hysteria/server.key
+else
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -subj "/CN=${domain:-hysteria2}" \
+    -keyout /etc/hysteria/server.key \
+    -out /etc/hysteria/server.crt >/dev/null 2>&1
+fi
+
+chmod 644 /etc/hysteria/server.crt
+chmod 600 /etc/hysteria/server.key
+print_ok "Certificate Hysteria2 siap"

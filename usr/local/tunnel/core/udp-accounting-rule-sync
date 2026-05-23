@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+TUNNEL_DB="${TUNNEL_DB:-/etc/tunnel/tunnel.db}"
+BACKEND="${1:-auto}"
+detect_backend(){
+  if [ "$BACKEND" != auto ]; then echo "$BACKEND"; return; fi
+  if command -v nft >/dev/null 2>&1; then echo nft; elif command -v iptables >/dev/null 2>&1; then echo iptables; else echo none; fi
+}
+esc(){ db_escape "$1"; }
+init_db(){ db_init >/dev/null 2>&1; /usr/local/tunnel/core/udp-port-mapper auto-from-accounts >/dev/null 2>&1 || true; }
+sync_nft(){
+  command -v nft >/dev/null 2>&1 || { echo "nft not found" >&2; return 1; }
+  nft add table inet tunnelgo_udp 2>/dev/null || true
+  nft 'add chain inet tunnelgo_udp input { type filter hook input priority -50; policy accept; }' 2>/dev/null || true
+  nft 'add chain inet tunnelgo_udp output { type filter hook output priority -50; policy accept; }' 2>/dev/null || true
+  nft flush chain inet tunnelgo_udp input 2>/dev/null || true
+  nft flush chain inet tunnelgo_udp output 2>/dev/null || true
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT username,protocol,start_port,end_port FROM udp_port_rules WHERE status='active';" | while IFS='|' read -r user proto start end; do
+    [ -n "$user" ] || continue
+    label="${user}:${proto}:${start}-${end}"
+    if [ "$start" = "$end" ]; then
+      nft add rule inet tunnelgo_udp input udp dport "$start" counter comment "tg_udp_rx:$label" 2>/dev/null || true
+      nft add rule inet tunnelgo_udp output udp sport "$start" counter comment "tg_udp_tx:$label" 2>/dev/null || true
+    else
+      nft add rule inet tunnelgo_udp input udp dport "$start-$end" counter comment "tg_udp_rx:$label" 2>/dev/null || true
+      nft add rule inet tunnelgo_udp output udp sport "$start-$end" counter comment "tg_udp_tx:$label" 2>/dev/null || true
+    fi
+    sqlite3 "$TUNNEL_DB" "INSERT INTO accounting_events(event,username,protocol,backend,payload) VALUES('udp.rule.synced','$(esc "$user")','$(esc "$proto")','nft','{\"ports\":\"$start-$end\"}');" >/dev/null 2>&1 || true
+  done
+  echo "UDP accounting nft rules synced"
+}
+sync_iptables(){
+  command -v iptables >/dev/null 2>&1 || { echo "iptables not found" >&2; return 1; }
+  iptables -N TUNNELGO_UDP_IN 2>/dev/null || true
+  iptables -N TUNNELGO_UDP_OUT 2>/dev/null || true
+  iptables -C INPUT -p udp -j TUNNELGO_UDP_IN 2>/dev/null || iptables -I INPUT 1 -p udp -j TUNNELGO_UDP_IN 2>/dev/null || true
+  iptables -C OUTPUT -p udp -j TUNNELGO_UDP_OUT 2>/dev/null || iptables -I OUTPUT 1 -p udp -j TUNNELGO_UDP_OUT 2>/dev/null || true
+  iptables -F TUNNELGO_UDP_IN 2>/dev/null || true
+  iptables -F TUNNELGO_UDP_OUT 2>/dev/null || true
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT username,protocol,start_port,end_port FROM udp_port_rules WHERE status='active';" | while IFS='|' read -r user proto start end; do
+    [ -n "$user" ] || continue
+    label="tg_udp:${user}:${proto}:${start}-${end}"
+    if [ "$start" = "$end" ]; then
+      iptables -A TUNNELGO_UDP_IN -p udp --dport "$start" -m comment --comment "rx:$label" -j RETURN 2>/dev/null || true
+      iptables -A TUNNELGO_UDP_OUT -p udp --sport "$start" -m comment --comment "tx:$label" -j RETURN 2>/dev/null || true
+    else
+      iptables -A TUNNELGO_UDP_IN -p udp --dport "$start:$end" -m comment --comment "rx:$label" -j RETURN 2>/dev/null || true
+      iptables -A TUNNELGO_UDP_OUT -p udp --sport "$start:$end" -m comment --comment "tx:$label" -j RETURN 2>/dev/null || true
+    fi
+    sqlite3 "$TUNNEL_DB" "INSERT INTO accounting_events(event,username,protocol,backend,payload) VALUES('udp.rule.synced','$(esc "$user")','$(esc "$proto")','iptables','{\"ports\":\"$start-$end\"}');" >/dev/null 2>&1 || true
+  done
+  echo "UDP accounting iptables rules synced"
+}
+init_db
+backend="$(detect_backend)"
+case "$backend" in
+  nft) sync_nft ;;
+  iptables) sync_iptables ;;
+  none) echo "No nftables/iptables backend found" >&2; exit 1 ;;
+  *) echo "Invalid backend: $backend" >&2; exit 1 ;;
+esac
+sqlite3 "$TUNNEL_DB" "INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES('udp_accounting_backend','$backend',CURRENT_TIMESTAMP);" >/dev/null 2>&1 || true

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+while true; do
+  ui_sub_header "BUSINESS / PROTOCOL LAYER"
+  echo -e "${ui_cyan}[1]${ui_white} Supported Protocols${ui_reset}"
+  echo -e "${ui_cyan}[2]${ui_white} Package Catalog${ui_reset}"
+  echo -e "${ui_cyan}[3]${ui_white} Create Multi-Protocol Account${ui_reset}"
+  echo -e "${ui_cyan}[4]${ui_white} Get Account Message${ui_reset}"
+  echo -e "${ui_red}[X]${ui_white} Back${ui_reset}"
+  ui_sub_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in
+    1) /usr/local/tunnel/core/protocol-registry list ;;
+    2) /usr/local/tunnel/core/package-manager list ;;
+    3)
+      read -rp "Username : " user
+      read -rp "Password kosong=auto : " pass
+      read -rp "Protocols comma separated [ssh] : " protos; protos="${protos:-ssh}"
+      read -rp "Expired days [30] : " days; days="${days:-30}"
+      read -rp "Quota GB [0] : " quota; quota="${quota:-0}"
+      read -rp "Limit IP [1] : " ip; ip="${ip:-1}"
+      payload=$(python3 - "$user" "$pass" "$protos" "$days" "$quota" "$ip" <<'PY'
+import json,sys
+u,p,protos,days,quota,ip=sys.argv[1:]
+print(json.dumps({"username":u,"password":p,"protocols":[x.strip() for x in protos.split(",") if x.strip()],"expired_days":int(days),"quota_gb":int(quota),"ip_limit":int(ip)}))
+PY
+)
+      /usr/local/tunnel/core/protocol-dispatcher create "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("message",""))'
+      ;;
+    4)
+      read -rp "Username : " user
+      sqlite3 -line /etc/tunnel/tunnel.db "SELECT protocol,message FROM account_protocol_details WHERE username='$user';"
+      ;;
+    x|X) exit 0 ;;
+    *) echo "Pilihan tidak valid" ;;
+  esac
+  ui_wait
+done

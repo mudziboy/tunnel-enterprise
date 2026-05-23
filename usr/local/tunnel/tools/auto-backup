@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+
+require_root
+
+cat > /etc/cron.d/tunnel-auto-backup <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+15 3 * * * root /usr/local/tunnel/tools/backup >/dev/null 2>&1
+EOF
+
+chmod 644 /etc/cron.d/tunnel-auto-backup
+print_ok "Auto backup aktif setiap 03:15"

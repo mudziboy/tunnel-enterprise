@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+db_init >/dev/null 2>&1
+/usr/local/tunnel/core/session-monitor >/dev/null 2>&1 || true
+lock_user(){
+  local u="$1" p="$2" count="$3" limit="$4"
+  db_set_account_status "$u" "$p" locked "ip_limit:${count}/${limit}"
+  sqlite3 "$TUNNEL_DB" "INSERT INTO ip_limit_logs(username,protocol,ip_count,ip_limit,action) VALUES('$(db_escape "$u")','$(db_escape "$p")',$count,$limit,'locked');" 2>/dev/null || true
+  db_log_event "" "$u" "$p" "ip_limit_exceeded" "{\"ip_count\":$count,\"ip_limit\":$limit}"
+  /usr/local/tunnel/core/enforcement-actions apply "$u" "$p" "ip_limit_exceeded" >/dev/null 2>&1 || true
+}
+sqlite3 -separator $'\t' "$TUNNEL_DB" "SELECT a.username,a.protocol,a.ip_limit,COUNT(DISTINCT s.remote_ip) FROM accounts a LEFT JOIN sessions s ON s.username=a.username AND (s.protocol=a.protocol OR (a.protocol IN ('vmess','vless','trojan','shadowsocks') AND s.protocol='xray')) WHERE a.status IN ('active','trial') AND a.ip_limit>0 GROUP BY a.username,a.protocol,a.ip_limit;" 2>/dev/null | while IFS=$'\t' read -r u p limit count; do
+  [ -n "$u" ] || continue
+  [ "${count:-0}" -gt "${limit:-0}" ] && lock_user "$u" "$p" "$count" "$limit"
+done
+case "${1:-table}" in
+  --json|json) sqlite3 -json "$TUNNEL_DB" "SELECT a.username,a.protocol,a.ip_limit,COUNT(DISTINCT s.remote_ip) ip_count,a.status FROM accounts a LEFT JOIN sessions s ON s.username=a.username GROUP BY a.username,a.protocol,a.ip_limit,a.status;" ;;
+  *) sqlite3 -header -column "$TUNNEL_DB" "SELECT a.username,a.protocol,a.ip_limit,COUNT(DISTINCT s.remote_ip) ip_count,a.status FROM accounts a LEFT JOIN sessions s ON s.username=a.username GROUP BY a.username,a.protocol,a.ip_limit,a.status ORDER BY ip_count DESC;" ;;
+esac

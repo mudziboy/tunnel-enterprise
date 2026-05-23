@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+username="${1:-}"
+quota="${2:-0}"
+iplimit="${3:-0}"
+[ -n "$username" ] || read -rp "Username: " username
+mkdir -p /etc/tunnel/users/ssh
+printf '%s\n' "$quota" > "/etc/tunnel/users/ssh/$username.quota"
+printf '%s\n' "$iplimit" > "/etc/tunnel/users/ssh/$username.iplimit"
+echo "Limit SSH disimpan: $username quota=$quota iplimit=$iplimit"

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/service-map
+NODE_JSON=/etc/tunnel/node.json
+CAP="$(/usr/local/tunnel/node/node-capacity 2>/dev/null || echo '{}')"
+SERVICES="{}"
+if command -v jq >/dev/null 2>&1; then
+  tmp="{}"; for s in $(service_list); do st="$(service_status_value "$s")"; tmp="$(printf '%s' "$tmp" | jq --arg k "$s" --arg v "$st" '. + {($k):$v}')"; done; SERVICES="$tmp"
+fi
+if command -v jq >/dev/null 2>&1 && [ -f "$NODE_JSON" ]; then
+  jq -n --slurpfile node "$NODE_JSON" --argjson capacity "$CAP" --argjson services "$SERVICES" '{node:$node[0],capacity:$capacity,services:$services,checked_at:now|todate}'
+else
+  echo "{\"capacity\":$CAP}"
+fi

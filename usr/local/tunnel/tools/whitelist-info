@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+echo "Whitelist Info"
+echo "=============="
+echo "Raw URL : $(grep -E '^WHITELIST_RAW_URL=' /etc/tunnel/whitelist.env 2>/dev/null | cut -d= -f2- | tr -d '"')"
+echo "Cache   : /etc/tunnel/runtime/whitelist-cache.json"
+echo "VPS IP  : $(curl -4s --max-time 5 https://ipv4.icanhazip.com 2>/dev/null | tr -d ' \t\r\n' || echo '-')"
+echo ""
+[ -f /etc/tunnel/runtime/whitelist-cache.json ] && jq . /etc/tunnel/runtime/whitelist-cache.json 2>/dev/null || true

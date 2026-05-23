@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/database
+
+require_root
+load_tunnel_config
+db_init
+
+ZIVPN_DIR="/etc/zivpn"
+ZIVPN_CFG="$ZIVPN_DIR/config.json"
+ZIVPN_PORT="${ZIVPN_PORT:-5667}"
+tmp="/etc/tunnel/runtime/zivpn-config.json"
+
+mkdir -p "$ZIVPN_DIR" /etc/tunnel/runtime
+
+python3 /usr/local/tunnel/core/zivpn/render-zivpn-json.py \
+  --db "$TUNNEL_DB" \
+  --listen ":$ZIVPN_PORT" \
+  --cert "$ZIVPN_DIR/zivpn.crt" \
+  --key "$ZIVPN_DIR/zivpn.key" \
+  --output "$tmp"
+
+jq empty "$tmp"
+if [ -f "$ZIVPN_CFG" ]; then
+  cp -a "$ZIVPN_CFG" "/etc/tunnel/runtime/zivpn/config.json.$(date +%Y%m%d-%H%M%S).bak" 2>/dev/null || true
+fi
+install -m 0644 "$tmp" "$ZIVPN_CFG"
+
+if systemctl list-unit-files zivpn.service >/dev/null 2>&1; then
+  systemctl restart zivpn || true
+fi
+
+print_ok "Config ZiVPN diterapkan"

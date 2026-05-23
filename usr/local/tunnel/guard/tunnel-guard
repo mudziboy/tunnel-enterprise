@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common 2>/dev/null || true
+. /usr/local/tunnel/lib/config 2>/dev/null || true
+. /usr/local/tunnel/lib/database
+TUNNEL_GUARD_LOG="${TUNNEL_GUARD_LOG:-/usr/local/tunnel/logs/tunnel-guard.log}"
+mkdir -p "$(dirname "$TUNNEL_GUARD_LOG")" /etc/tunnel/runtime
+log(){ printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$TUNNEL_GUARD_LOG"; }
+lock_account(){
+  local user="$1" proto="$2" reason="$3"
+  db_set_account_status "$user" "$proto" locked "guard:$reason"
+  db_log_event "" "$user" "$proto" "locked" "{\"reason\":\"$reason\"}"
+  /usr/local/tunnel/core/enforcement-actions apply "$user" "$proto" "$reason" >/dev/null 2>&1 || true
+  log "LOCKED user=$user proto=$proto reason=$reason"
+}
+expire_check(){
+  local today; today="$(date -u '+%Y-%m-%d')"
+  sqlite3 -separator $'\t' "$TUNNEL_DB" "SELECT username,protocol FROM accounts WHERE status IN ('active','trial') AND expired_at < '$today';" 2>/dev/null | while IFS=$'\t' read -r u p; do
+    [ -n "$u" ] && lock_account "$u" "$p" expired
+  done
+}
+main(){
+  db_init
+  log "guard_cycle_start"
+  expire_check
+  /usr/local/tunnel/core/accounting-rule-sync auto >/dev/null 2>&1 || log "accounting_rule_sync_failed"
+  /usr/local/tunnel/core/session-monitor >/dev/null 2>&1 || log "session_monitor_failed"
+  /usr/local/tunnel/core/traffic-accounting >/dev/null 2>&1 || log "traffic_accounting_failed"
+  /usr/local/tunnel/core/ip-limit-enforcer >/dev/null 2>&1 || log "ip_limit_enforcer_failed"
+  /usr/local/tunnel/core/quota-manager >/dev/null 2>&1 || log "quota_manager_failed"
+  /usr/local/tunnel/core/job-runner run-pending >/dev/null 2>&1 || log "job_runner_failed"
+  log "guard_cycle_done"
+}
+main "$@"

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  mapper) /usr/local/tunnel/core/udp-port-mapper "$@" ;;
+  assign) /usr/local/tunnel/core/udp-port-mapper assign "$@" ;;
+  release) /usr/local/tunnel/core/udp-port-mapper release "$@" ;;
+  sync) /usr/local/tunnel/core/udp-accounting-rule-sync "${1:-auto}" ;;
+  collect) /usr/local/tunnel/core/udp-accounting-collector "${1:---json}" ;;
+  table) /usr/local/tunnel/core/udp-accounting-collector table ;;
+  json) /usr/local/tunnel/core/udp-accounting-collector --json ;;
+  block) /usr/local/tunnel/core/udp-enforcer block "$@" ;;
+  unblock) /usr/local/tunnel/core/udp-enforcer unblock "$@" ;;
+  abuse) /usr/local/tunnel/core/anti-abuse-policy "${1:---json}" ;;
+  *) cat <<USAGE
+Tunnel Go UDP Accounting v5.4
+Usage: tunnel-udp-accounting <command>
+Commands:
+  assign <username> <start> [end] [protocol]
+  release <username> [protocol]
+  mapper list|json|import-file|auto-from-accounts
+  sync [auto|nft|iptables]
+  collect [--json]
+  table
+  json
+  block <username>
+  unblock <username>
+  abuse [--json]
+USAGE
+  ;;
+esac

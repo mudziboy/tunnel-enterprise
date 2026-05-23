@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+log="/usr/local/tunnel/logs/audit.log"
+[ -f "$log" ] || touch "$log"
+tail -n "${1:-100}" "$log"

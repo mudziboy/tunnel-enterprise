@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+while true; do
+  ui_sub_header "DIAGNOSTIC CENTER"
+  echo -e "${ui_cyan}[1]${ui_white} FULL DIAGNOSTIC${ui_reset}"
+  echo -e "${ui_cyan}[2]${ui_white} HEALTH CHECK${ui_reset}"
+  echo -e "${ui_cyan}[3]${ui_white} SSH / VPN DIAGNOSE${ui_reset}"
+  echo -e "${ui_cyan}[4]${ui_white} REPAIR SSH LOGIN${ui_reset}"
+  echo -e "${ui_cyan}[5]${ui_white} SERVICE STATUS${ui_reset}"
+  echo -e "${ui_cyan}[6]${ui_white} CONNECTION DOCTOR${ui_reset}"
+  echo -e "${ui_cyan}[7]${ui_white} CONNECTION OPTIMIZER${ui_reset}"
+  echo -e "${ui_cyan}[8]${ui_white} RUN TUNNEL GUARD NOW${ui_reset}"
+  echo -e "${ui_cyan}[9]${ui_white} TUNNEL GUARD LOG${ui_reset}"
+  echo -e "${ui_red}[X]${ui_white} BACK${ui_reset}"
+  ui_sub_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in
+    1) /usr/local/tunnel/tools/diagnostic; ui_wait ;;
+    2) /usr/local/tunnel/tools/health-check; ui_wait ;;
+    3) /usr/local/tunnel/tools/ssh-vpn-diagnose; ui_wait ;;
+    4) /usr/local/tunnel/tools/repair-ssh-login; ui_wait ;;
+    5) systemctl --type=service --state=running --no-pager | grep -E 'ssh|dropbear|nginx|haproxy|xray|zivpn|sing|hysteria|tuic|wg|tunnel|api' || true; ui_wait ;;
+    6) /usr/local/tunnel/tools/connection-doctor; ui_wait ;;
+    7) /usr/local/tunnel/tools/connection-optimizer; ui_wait ;;
+    8) /usr/local/tunnel/guard/tunnel-guard; ui_wait ;;
+    9) tail -n 120 /usr/local/tunnel/logs/tunnel-guard.log 2>/dev/null || true; ui_wait ;;
+    x|X) exit 0 ;;
+    *) ui_warn "Pilihan tidak valid"; sleep 1 ;;
+  esac
+done

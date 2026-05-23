@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+protocol="$1"; username="$2"; days="$3"; quota="${4:-0}"; iplimit="${5:-0}"; transport="${6:-}"; password="${7:-}"
+. /usr/local/tunnel/lib/account
+require_root
+account_init
+require_valid_protocol "$protocol"
+require_valid_username "$username"
+is_valid_days "$days" || { echo "Invalid days"; exit 1; }
+is_valid_quota_gb "$quota" || { echo "Invalid quota"; exit 1; }
+is_valid_ip_limit "$iplimit" || { echo "Invalid ip limit"; exit 1; }
+db_account_exists "$username" "$protocol" && { echo "Account exists"; exit 1; }
+secret="$password"; [ -n "$secret" ] || secret="$(account_random_secret)"
+expired="$(account_expiry_date "$days")"
+uuid="$secret"
+db_add_account "$username" "$protocol" "$transport" "$uuid" "$secret" "$quota" "$iplimit" "$expired" "active" "" "api"
+account_id="$(db_account_id "$username" "$protocol")"
+db_log_event "$account_id" "$username" "$protocol" "api-add" "days=$days quota_gb=$quota ip_limit=$iplimit transport=$transport"
+audit_log "api" "add-account" "$username/$protocol" "days=$days quota_gb=$quota ip_limit=$iplimit"
+case "$protocol" in
+  ssh) /usr/local/tunnel/core/ssh/add-ssh "$username" "$days" "$quota" "$iplimit" "" "$secret" ;;
+  vmess|vless|trojan|shadowsocks) /usr/local/tunnel/core/xray/render-xray-config "$protocol" ;;
+  zivpn) /usr/local/tunnel/core/zivpn/render-zivpn-config ;;
+  sing-box) /usr/local/tunnel/core/sing-box/render-sing-box-config ;;
+  hysteria2) /usr/local/tunnel/core/hysteria2/render-hysteria2-config ;;
+  tuic) /usr/local/tunnel/core/tuic/render-tuic-config ;;
+  wireguard) /usr/local/tunnel/core/wireguard/render-wireguard-config ;;
+esac
+domain="$(cat /etc/tunnel/domain 2>/dev/null | tr -d ' \t\r\n' || true)"
+host="${domain:-$(curl -4s --max-time 3 ipv4.icanhazip.com 2>/dev/null | tr -d '\n')}"
+cat <<EOF
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          ACCOUNT CREATED • TUNNEL GO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Protocol       : $protocol
+Transport      : ${transport:-default}
+Host/IP        : $host
+Username       : $username
+Password/UUID  : $secret
+Expired        : $expired
+Limit IP       : $iplimit
+Quota          : ${quota} GB
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EOF

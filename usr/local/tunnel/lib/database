@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+TUNNEL_DB="${TUNNEL_DB:-/etc/tunnel/tunnel.db}"
+db_escape(){ printf "%s" "${1:-}" | sed "s/'/''/g"; }
+db_exec(){ sqlite3 "$TUNNEL_DB" "$1"; }
+db_query(){ sqlite3 -header -column "$TUNNEL_DB" "$1"; }
+db_json(){ sqlite3 -json "$TUNNEL_DB" "$1"; }
+db_init(){
+  mkdir -p "$(dirname "$TUNNEL_DB")" /etc/tunnel/runtime/locks /etc/tunnel/runtime/outbox /etc/tunnel/backups /etc/tunnel/users /usr/local/tunnel/logs
+  sqlite3 "$TUNNEL_DB" <<'SQL'
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+CREATE TABLE IF NOT EXISTS nodes_local_info (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,transport TEXT DEFAULT '',uuid TEXT,password TEXT,quota_gb INTEGER DEFAULT 0,ip_limit INTEGER DEFAULT 0,device_limit INTEGER DEFAULT 0,expired_at TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',note TEXT DEFAULT '',created_by TEXT DEFAULT 'local',node_id TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(username, protocol));
+CREATE TABLE IF NOT EXISTS account_protocols (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,config TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(username,protocol));
+CREATE TABLE IF NOT EXISTS account_protocol_details (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,engine TEXT DEFAULT '',uuid TEXT DEFAULT '',password TEXT DEFAULT '',port TEXT DEFAULT '',path TEXT DEFAULT '',sni TEXT DEFAULT '',client_ip TEXT DEFAULT '',public_key TEXT DEFAULT '',private_key TEXT DEFAULT '',config_uri TEXT DEFAULT '',config_text TEXT DEFAULT '',message TEXT DEFAULT '',status TEXT DEFAULT 'active',expired_at TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(username,protocol));
+CREATE TABLE IF NOT EXISTS packages (id TEXT PRIMARY KEY,name TEXT NOT NULL,protocols TEXT NOT NULL,duration_days INTEGER DEFAULT 30,quota_gb INTEGER DEFAULT 0,ip_limit INTEGER DEFAULT 1,device_limit INTEGER DEFAULT 1,price INTEGER DEFAULT 0,active INTEGER DEFAULT 1,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS package_orders (id INTEGER PRIMARY KEY AUTOINCREMENT,order_id TEXT UNIQUE,package_id TEXT,username TEXT,protocols TEXT,total_price INTEGER DEFAULT 0,status TEXT DEFAULT 'created',payload TEXT DEFAULT '{}',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS wireguard_ip_pool (client_ip TEXT PRIMARY KEY,username TEXT DEFAULT '',status TEXT DEFAULT 'free',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS protocol_operations (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT DEFAULT '',protocol TEXT DEFAULT '',operation TEXT NOT NULL,status TEXT DEFAULT '',detail TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS account_events (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,username TEXT NOT NULL,protocol TEXT NOT NULL,action TEXT NOT NULL,detail TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE SET NULL);
+CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,remote_ip TEXT NOT NULL,connected_at TEXT DEFAULT CURRENT_TIMESTAMP,last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,status TEXT DEFAULT 'active',source TEXT DEFAULT '',raw TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS session_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT,protocol TEXT,ip_count INTEGER DEFAULT 0,raw TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS traffic_usage (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,uplink_bytes INTEGER DEFAULT 0,downlink_bytes INTEGER DEFAULT 0,total_bytes INTEGER GENERATED ALWAYS AS (uplink_bytes + downlink_bytes) VIRTUAL,collected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,source TEXT DEFAULT 'collector');
+CREATE TABLE IF NOT EXISTS traffic_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,uplink_bytes INTEGER DEFAULT 0,downlink_bytes INTEGER DEFAULT 0,collected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,source TEXT DEFAULT 'collector');
+CREATE TABLE IF NOT EXISTS traffic_counters (username TEXT NOT NULL,protocol TEXT NOT NULL,counter_key TEXT NOT NULL,rx_bytes INTEGER DEFAULT 0,tx_bytes INTEGER DEFAULT 0,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(username,protocol,counter_key));
+CREATE TABLE IF NOT EXISTS quota_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,quota_gb INTEGER DEFAULT 0,used_bytes INTEGER DEFAULT 0,action TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS ip_limit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,ip_count INTEGER DEFAULT 0,ip_limit INTEGER DEFAULT 0,action TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS service_status (service TEXT PRIMARY KEY,status TEXT NOT NULL DEFAULT 'OFF',detail TEXT DEFAULT '',checked_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS service_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,service TEXT,action TEXT,status TEXT,detail TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS jobs (id INTEGER PRIMARY KEY AUTOINCREMENT,job_id TEXT UNIQUE,type TEXT NOT NULL,payload TEXT DEFAULT '{}',status TEXT DEFAULT 'PENDING',result TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,started_at TEXT,finished_at TEXT);
+CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,node_id TEXT DEFAULT '',username TEXT DEFAULT '',protocol TEXT DEFAULT '',payload TEXT DEFAULT '{}',synced INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS outbox (id INTEGER PRIMARY KEY AUTOINCREMENT,event_id INTEGER,event TEXT NOT NULL,payload TEXT DEFAULT '{}',attempts INTEGER DEFAULT 0,status TEXT DEFAULT 'PENDING',last_error TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT,action TEXT NOT NULL,target TEXT,detail TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS api_keys (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT,key_hash TEXT,role TEXT DEFAULT 'BOT',allowed_ips TEXT DEFAULT '',enabled INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS whitelist_ips (ip TEXT PRIMARY KEY,note TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS backups (id INTEGER PRIMARY KEY AUTOINCREMENT,file TEXT NOT NULL,status TEXT DEFAULT 'created',size_bytes INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS packages_cache (id TEXT PRIMARY KEY,payload TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+
+CREATE TABLE IF NOT EXISTS accounting_rules (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,backend TEXT NOT NULL,direction TEXT DEFAULT 'out',match_type TEXT DEFAULT '',match_value TEXT DEFAULT '',counter_key TEXT NOT NULL UNIQUE,enabled INTEGER DEFAULT 1,last_rx_bytes INTEGER DEFAULT 0,last_tx_bytes INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS accounting_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,backend TEXT NOT NULL,counter_key TEXT NOT NULL,rx_bytes INTEGER DEFAULT 0,tx_bytes INTEGER DEFAULT 0,rx_delta INTEGER DEFAULT 0,tx_delta INTEGER DEFAULT 0,collected_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS accounting_events (id INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,username TEXT DEFAULT '',protocol TEXT DEFAULT '',backend TEXT DEFAULT '',payload TEXT DEFAULT '{}',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_accounting_rules_user ON accounting_rules(username,protocol,backend);
+CREATE INDEX IF NOT EXISTS idx_accounting_snapshots_user ON accounting_snapshots(username,protocol,collected_at);
+
+CREATE TABLE IF NOT EXISTS udp_port_rules (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL DEFAULT 'zivpn',start_port INTEGER NOT NULL,end_port INTEGER NOT NULL,direction TEXT DEFAULT 'both',backend TEXT DEFAULT 'auto',status TEXT DEFAULT 'active',note TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(username,protocol,start_port,end_port));
+CREATE TABLE IF NOT EXISTS udp_accounting_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT DEFAULT 'zivpn',backend TEXT DEFAULT '',start_port INTEGER,end_port INTEGER,rx_bytes INTEGER DEFAULT 0,tx_bytes INTEGER DEFAULT 0,rx_delta INTEGER DEFAULT 0,tx_delta INTEGER DEFAULT 0,collected_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS udp_counter_state (counter_key TEXT PRIMARY KEY,username TEXT NOT NULL,protocol TEXT DEFAULT 'zivpn',rx_bytes INTEGER DEFAULT 0,tx_bytes INTEGER DEFAULT 0,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS abuse_events (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT DEFAULT '',severity TEXT DEFAULT 'warning',rule TEXT NOT NULL,value INTEGER DEFAULT 0,limit_value INTEGER DEFAULT 0,action TEXT DEFAULT 'event',payload TEXT DEFAULT '{}',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS abuse_policies (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_udp_rules_user ON udp_port_rules(username,protocol,status);
+CREATE INDEX IF NOT EXISTS idx_udp_snap_user ON udp_accounting_snapshots(username,protocol,collected_at);
+CREATE INDEX IF NOT EXISTS idx_abuse_events_user ON abuse_events(username,protocol,created_at);
+CREATE TABLE IF NOT EXISTS enforcement_state (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
+CREATE INDEX IF NOT EXISTS idx_accounts_protocol ON accounts(protocol);
+CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status);
+CREATE INDEX IF NOT EXISTS idx_accounts_expired_at ON accounts(expired_at);
+CREATE INDEX IF NOT EXISTS idx_events_user_proto ON account_events(username, protocol);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(username, protocol, remote_ip);
+CREATE INDEX IF NOT EXISTS idx_traffic_user ON traffic_usage(username, protocol);
+CREATE INDEX IF NOT EXISTS idx_events_sync ON events(synced, created_at);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status, created_at);
+INSERT OR IGNORE INTO schema_migrations(version) VALUES('5.1-node-agent');
+INSERT OR IGNORE INTO schema_migrations(version) VALUES('5.2-enforcement');
+INSERT OR IGNORE INTO schema_migrations(version) VALUES('5.3-accounting');
+INSERT OR IGNORE INTO schema_migrations(version) VALUES('5.4-udp-anti-abuse');
+INSERT OR IGNORE INTO schema_migrations(version) VALUES('5.5-business-protocol-layer');
+SQL
+  /usr/local/tunnel/core/package-manager sync-db >/dev/null 2>&1 || true
+  /usr/local/tunnel/core/wireguard/ip-pool-manager init >/dev/null 2>&1 || true
+  chmod 600 "$TUNNEL_DB" 2>/dev/null || true
+}
+db_account_exists(){ local username protocol count; username="$(db_escape "$1")"; protocol="$(db_escape "$2")"; count="$(sqlite3 "$TUNNEL_DB" "SELECT COUNT(*) FROM accounts WHERE username='$username' AND protocol='$protocol';")"; [ "${count:-0}" -gt 0 ]; }
+db_account_id(){ local username protocol; username="$(db_escape "$1")"; protocol="$(db_escape "$2")"; sqlite3 "$TUNNEL_DB" "SELECT id FROM accounts WHERE username='$username' AND protocol='$protocol' LIMIT 1;"; }
+db_add_account(){ local username protocol transport uuid password quota iplimit expired status note created_by; username="$(db_escape "$1")"; protocol="$(db_escape "$2")"; transport="$(db_escape "${3:-}")"; uuid="$(db_escape "${4:-}")"; password="$(db_escape "${5:-}")"; quota="${6:-0}"; iplimit="${7:-0}"; expired="$(db_escape "$8")"; status="$(db_escape "${9:-active}")"; note="$(db_escape "${10:-}")"; created_by="$(db_escape "${11:-local}")"; sqlite3 "$TUNNEL_DB" "INSERT INTO accounts(username, protocol, transport, uuid, password, quota_gb, ip_limit, expired_at, status, note, created_by) VALUES('$username','$protocol','$transport','$uuid','$password',$quota,$iplimit,'$expired','$status','$note','$created_by');"; }
+db_set_account_status(){ local username protocol status note; username="$(db_escape "$1")"; protocol="$(db_escape "$2")"; status="$(db_escape "$3")"; note="$(db_escape "${4:-}")"; sqlite3 "$TUNNEL_DB" "UPDATE accounts SET status='$status', note=CASE WHEN '$note'='' THEN note ELSE '$note' END, updated_at=CURRENT_TIMESTAMP WHERE username='$username' AND protocol='$protocol';"; }
+db_log_event(){ local account_id username protocol action detail node id; account_id="${1:-NULL}"; username="$(db_escape "$2")"; protocol="$(db_escape "$3")"; action="$(db_escape "$4")"; detail="$(db_escape "${5:-{}}")"; node="$(db_escape "$(jq -r '.node_id // empty' /etc/tunnel/node.json 2>/dev/null || true)")"; [ "$account_id" = "" ] && account_id="NULL"; sqlite3 "$TUNNEL_DB" "INSERT INTO account_events(account_id, username, protocol, action, detail) VALUES($account_id,'$username','$protocol','$action','$detail'); INSERT INTO events(event,node_id,username,protocol,payload) VALUES('account.$action','$node','$username','$protocol','$detail'); INSERT INTO outbox(event_id,event,payload) VALUES(last_insert_rowid(),'account.$action','$detail');" 2>/dev/null || true; }
+db_audit(){ local actor action target detail; actor="$(db_escape "${1:-system}")"; action="$(db_escape "${2:-}")"; target="$(db_escape "${3:-}")"; detail="$(db_escape "${4:-}")"; sqlite3 "$TUNNEL_DB" "INSERT INTO audit_logs(actor,action,target,detail) VALUES('$actor','$action','$target','$detail');" 2>/dev/null || true; }
+db_list_accounts(){ sqlite3 -header -column "$TUNNEL_DB" "SELECT id, username, protocol, transport, quota_gb, ip_limit, device_limit, expired_at, status FROM accounts ORDER BY protocol, username;"; }
+db_detail_account(){ local username protocol; username="$(db_escape "$1")"; protocol="$(db_escape "$2")"; sqlite3 -header -column "$TUNNEL_DB" "SELECT * FROM accounts WHERE username='$username' AND protocol='$protocol';"; }

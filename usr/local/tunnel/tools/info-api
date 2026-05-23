@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+echo "Tunnel API"
+echo "=========="
+echo "Port    : 5889"
+echo "API Key : /etc/tunnel/api.key"
+echo ""
+if [ -f /etc/tunnel/api.key ]; then
+  echo "Current key:"
+  cat /etc/tunnel/api.key
+fi
+echo ""
+echo "Health endpoint:"
+echo "GET /health"
+echo ""
+echo "Authenticated examples:"
+echo "GET    /api/accounts"
+echo "POST   /api/accounts"
+echo "DELETE /api/accounts/:protocol/:username"
+echo "PATCH  /api/accounts/:protocol/:username/renew"
+echo "PATCH  /api/accounts/:protocol/:username/limit"

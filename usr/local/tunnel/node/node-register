@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+NODE_ID="${1:-}"
+NODE_NAME="${2:-Tunnel Go Node}"
+DOMAIN="$(cat /etc/tunnel/domain 2>/dev/null || true)"
+IP="$(curl -4fsS --max-time 4 https://ipv4.icanhazip.com 2>/dev/null | tr -d ' \t\r\n' || true)"
+[ -n "$NODE_ID" ] || NODE_ID="node-$(echo "$IP" | tr . -)-$(date +%s)"
+mkdir -p /etc/tunnel
+SECRET="$(openssl rand -hex 32 2>/dev/null || tr -dc A-Fa-f0-9 </dev/urandom | head -c 64)"
+echo "$SECRET" > /etc/tunnel/node.secret
+chmod 600 /etc/tunnel/node.secret
+cat > /etc/tunnel/node.json <<EOF
+{"node_id":"$NODE_ID","name":"$NODE_NAME","region":"auto","provider":"auto","public_ip":"$IP","domain":"$DOMAIN","api_url":"","timezone":"Asia/Jakarta","max_accounts":500,"max_sessions":1000,"sell_enabled":true,"maintenance_mode":false,"drain_mode":false,"enabled":true}
+EOF
+chmod 600 /etc/tunnel/node.json
+echo "Node registered: $NODE_ID"

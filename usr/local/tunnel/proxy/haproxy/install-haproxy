@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/dependencies
+
+require_root
+install_packages haproxy
+
+mkdir -p /etc/haproxy /etc/tunnel/runtime
+/usr/local/tunnel/proxy/haproxy/prepare-haproxy-cert
+/usr/local/tunnel/proxy/haproxy/render-haproxy-config
+
+haproxy -c -f /etc/haproxy/haproxy.cfg
+systemctl enable haproxy >/dev/null 2>&1
+systemctl restart haproxy
+
+print_ok "HAProxy siap"

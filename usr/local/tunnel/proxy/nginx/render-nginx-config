@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+
+require_root
+load_tunnel_config
+
+mkdir -p /var/www/tunnel-status /.well-known/acme-challenge /var/www/tunnel-status/.well-known/acme-challenge
+
+cat > /var/www/tunnel-status/index.html <<'HTML'
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tunnel Enterprise</title>
+<style>
+body{margin:0;background:#0f172a;color:#e5e7eb;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{max-width:560px;padding:32px;border:1px solid rgba(255,255,255,.1);border-radius:24px;background:rgba(15,23,42,.8);box-shadow:0 30px 80px rgba(0,0,0,.35)}
+h1{margin:0 0 12px;font-size:28px}
+p{margin:0;color:#94a3b8;line-height:1.6}
+.badge{display:inline-block;margin-top:18px;padding:8px 12px;border-radius:999px;background:#111827;color:#38bdf8;font-weight:700;font-size:12px}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Tunnel Enterprise</h1>
+<p>Server is running. This endpoint is used for status page, fallback route, and ACME challenge.</p>
+<div class="badge">ONLINE</div>
+</div>
+</body>
+</html>
+HTML
+
+cat > /etc/nginx/conf.d/tunnel-status.conf <<'EOF'
+server {
+    listen 127.0.0.1:8081;
+    server_name _;
+    root /var/www/tunnel-status;
+    index index.html;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/tunnel-status;
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}
+EOF
+
+rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+nginx -t
+print_ok "Nginx status config berhasil dibuat"

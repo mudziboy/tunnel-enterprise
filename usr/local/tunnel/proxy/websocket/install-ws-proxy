@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+require_root
+load_tunnel_config 2>/dev/null || true
+install -m 0755 /usr/local/tunnel/proxy/websocket/ws-proxy.py /usr/local/bin/tunnel-ws-proxy
+cat > /etc/systemd/system/tunnel-ws-proxy.service <<EOF2
+[Unit]
+Description=Tunnel Go SSH WebSocket Proxy
+After=network-online.target ssh.service dropbear.service
+Wants=network-online.target
+
+[Service]
+User=root
+Environment=SSH_PORT=${SSH_PORT:-22}
+Environment=DROPBEAR_PORT=$(echo "${DROPBEAR_PORTS:-109,143}" | cut -d, -f1)
+Environment=OPENVPN_TCP_PORT=${OPENVPN_TCP_PORT:-1194}
+Environment=WS_DEFAULT_TARGET=${WS_DEFAULT_TARGET:-dropbear}
+Environment=WS_RESPONSE_MODE=${WS_RESPONSE_MODE:-auto}
+Environment=WS_IDLE_TIMEOUT=${WS_IDLE_TIMEOUT:-3600}
+ExecStart=/usr/bin/python3 /usr/local/bin/tunnel-ws-proxy 1010
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF2
+systemctl daemon-reload
+systemctl enable tunnel-ws-proxy >/dev/null 2>&1
+systemctl restart tunnel-ws-proxy
+print_ok "SSH WebSocket proxy siap di 127.0.0.1:1010"

@@ -1,0 +1,8 @@
+{
+  "profiles": [
+    "singbox_vless_ws",
+    "singbox_trojan_ws",
+    "singbox_hysteria2",
+    "singbox_tuic"
+  ]
+}

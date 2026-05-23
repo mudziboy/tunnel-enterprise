@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/dependencies
+require_root
+install_packages fail2ban logrotate
+mkdir -p /etc/tunnel/runtime/security
+[ -f /etc/ssh/sshd_config ] && cp -a /etc/ssh/sshd_config "/etc/tunnel/runtime/security/sshd_config.$(date +%Y%m%d-%H%M%S).bak"
+set_sshd(){ local key="$1" value="$2"; if grep -Eq "^[#[:space:]]*$key[[:space:]]+" /etc/ssh/sshd_config; then sed -i -E "s|^[#[:space:]]*$key[[:space:]]+.*|$key $value|" /etc/ssh/sshd_config; else echo "$key $value" >> /etc/ssh/sshd_config; fi; }
+# Enterprise safe hardening: protect brute-force without disabling password/root access.
+if [ -f /etc/ssh/sshd_config ]; then
+  set_sshd PasswordAuthentication yes
+  set_sshd KbdInteractiveAuthentication yes
+  set_sshd UsePAM yes
+  set_sshd PubkeyAuthentication yes
+  set_sshd PermitRootLogin "${TUNNEL_ROOT_LOGIN_POLICY:-yes}"
+  set_sshd MaxAuthTries 6
+  set_sshd LoginGraceTime 60
+  set_sshd ClientAliveInterval 120
+  set_sshd ClientAliveCountMax 2
+fi
+cat > /etc/fail2ban/jail.d/tunnel-ssh.conf <<'EOF'
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 8
+findtime = 10m
+bantime = 15m
+EOF
+cat > /etc/logrotate.d/tunnel-enterprise <<'EOF'
+/usr/local/tunnel/logs/*.log
+/var/log/xray/*.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+chmod -R go-rwx /etc/tunnel 2>/dev/null || true
+chmod -R go-rwx /usr/local/tunnel/logs 2>/dev/null || true
+chmod 755 /usr/local/tunnel 2>/dev/null || true
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+systemctl enable fail2ban >/dev/null 2>&1 || true
+systemctl restart fail2ban 2>/dev/null || true
+print_ok "Security hardening aman diterapkan. Password/root login tidak dimatikan."

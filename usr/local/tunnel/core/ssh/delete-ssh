@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+username="${1:-}"
+[ -n "$username" ] || read -rp "Username: " username
+pkill -u "$username" 2>/dev/null || true
+userdel "$username" 2>/dev/null || true
+rm -f "/etc/tunnel/users/ssh/$username."*
+echo "SSH user dihapus: $username"

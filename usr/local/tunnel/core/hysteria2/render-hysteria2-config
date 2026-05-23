@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/database
+
+require_root
+load_tunnel_config
+db_init
+
+mkdir -p /etc/hysteria /etc/tunnel/runtime/hysteria2
+
+python3 /usr/local/tunnel/core/hysteria2/render-hysteria2-yaml.py \
+  --db "$TUNNEL_DB" \
+  --port "${HYSTERIA2_PORT:-8443}" \
+  --output /etc/tunnel/runtime/hysteria2/config.yaml
+
+if command -v hysteria >/dev/null 2>&1; then
+  hysteria server -c /etc/tunnel/runtime/hysteria2/config.yaml check || true
+fi
+
+if [ -f /etc/hysteria/config.yaml ]; then
+  cp -a /etc/hysteria/config.yaml "/etc/tunnel/runtime/hysteria2/config.yaml.$(date +%Y%m%d-%H%M%S).bak"
+fi
+
+install -m 0644 /etc/tunnel/runtime/hysteria2/config.yaml /etc/hysteria/config.yaml
+
+if systemctl list-unit-files hysteria2.service >/dev/null 2>&1; then
+  systemctl restart hysteria2 || true
+fi
+
+print_ok "Config Hysteria2 diterapkan"

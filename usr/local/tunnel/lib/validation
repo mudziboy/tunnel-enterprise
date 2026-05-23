@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+is_valid_username() {
+  [[ "${1:-}" =~ ^[a-zA-Z0-9._-]{3,32}$ ]]
+}
+
+is_valid_password() {
+  [[ "${1:-}" =~ ^[a-zA-Z0-9._@#%+=:-]{3,64}$ ]]
+}
+
+is_valid_days() {
+  [[ "${1:-}" =~ ^[0-9]{1,5}$ ]] && [ "$1" -gt 0 ]
+}
+
+is_valid_port() {
+  [[ "${1:-}" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+is_valid_quota_gb() {
+  [[ "${1:-}" =~ ^[0-9]{1,6}$ ]]
+}
+
+is_valid_ip_limit() {
+  [[ "${1:-}" =~ ^[0-9]{1,4}$ ]]
+}
+
+is_valid_protocol() {
+  case "${1:-}" in
+    ssh|openvpn|vmess|vless|trojan|shadowsocks|zivpn|hysteria2|tuic|wireguard|sing-box) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_valid_domain() {
+  [[ "${1:-}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$ ]]
+}
+
+require_valid_username() {
+  is_valid_username "$1" || { echo "Username tidak valid"; exit 1; }
+}
+
+require_valid_protocol() {
+  is_valid_protocol "$1" || { echo "Protocol tidak valid"; exit 1; }
+}

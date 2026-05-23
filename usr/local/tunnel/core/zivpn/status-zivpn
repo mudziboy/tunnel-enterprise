@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+echo "ZiVPN Service"
+echo "============="
+systemctl status zivpn --no-pager 2>/dev/null || true
+echo ""
+echo "ZiVPN Port"
+echo "=========="
+ss -lnuup | grep -E ':5667|zivpn' || true
+echo ""
+echo "ZiVPN Config"
+echo "============"
+jq . /etc/zivpn/config.json 2>/dev/null || true

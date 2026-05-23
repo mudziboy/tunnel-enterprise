@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/database
+
+db_init
+echo "Database: $TUNNEL_DB"
+echo ""
+sqlite3 "$TUNNEL_DB" ".tables"
+echo ""
+sqlite3 -header -column "$TUNNEL_DB" "SELECT protocol, status, COUNT(*) total FROM accounts GROUP BY protocol, status ORDER BY protocol, status;"

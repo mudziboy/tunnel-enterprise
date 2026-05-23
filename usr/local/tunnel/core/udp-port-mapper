@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+. /usr/local/tunnel/lib/common 2>/dev/null || true
+TUNNEL_DB="${TUNNEL_DB:-/etc/tunnel/tunnel.db}"
+MAP_FILE="${UDP_MAP_FILE:-/etc/tunnel/zivpn-ports.map}"
+PORTS_ENV="/etc/tunnel/ports.env"
+esc(){ db_escape "$1"; }
+get_env(){ awk -F= -v k="$1" '$1==k {gsub(/^["'"'']|["'"'']$/,"",$2); print $2; exit}' "$PORTS_ENV" 2>/dev/null || true; }
+init_db(){ db_init >/dev/null 2>&1; sqlite3 "$TUNNEL_DB" <<'SQL'
+CREATE TABLE IF NOT EXISTS udp_port_rules (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL DEFAULT 'zivpn',start_port INTEGER NOT NULL,end_port INTEGER NOT NULL,direction TEXT DEFAULT 'both',backend TEXT DEFAULT 'auto',status TEXT DEFAULT 'active',note TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(username,protocol,start_port,end_port));
+CREATE TABLE IF NOT EXISTS udp_accounting_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT DEFAULT 'zivpn',backend TEXT DEFAULT '',start_port INTEGER,end_port INTEGER,rx_bytes INTEGER DEFAULT 0,tx_bytes INTEGER DEFAULT 0,rx_delta INTEGER DEFAULT 0,tx_delta INTEGER DEFAULT 0,collected_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS udp_counter_state (counter_key TEXT PRIMARY KEY,username TEXT NOT NULL,protocol TEXT DEFAULT 'zivpn',rx_bytes INTEGER DEFAULT 0,tx_bytes INTEGER DEFAULT 0,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_udp_rules_user ON udp_port_rules(username,protocol,status);
+CREATE INDEX IF NOT EXISTS idx_udp_snap_user ON udp_accounting_snapshots(username,protocol,collected_at);
+SQL
+}
+usage(){ cat <<USAGE
+Usage: udp-port-mapper <command>
+Commands:
+  import-file                  import /etc/tunnel/zivpn-ports.map
+  assign <username> <start> [end] [protocol]
+  release <username> [protocol]
+  list
+  json
+  auto-from-accounts           assign missing zivpn accounts from ZIVPN_PORT_POOL
+USAGE
+}
+assign_rule(){
+  local user="$1" start="$2" end="${3:-$2}" proto="${4:-zivpn}"
+  [[ "$start" =~ ^[0-9]+$ && "$end" =~ ^[0-9]+$ ]] || { echo "Invalid port" >&2; exit 1; }
+  [ "$start" -le "$end" ] || { echo "start_port greater than end_port" >&2; exit 1; }
+  sqlite3 "$TUNNEL_DB" "INSERT OR REPLACE INTO udp_port_rules(username,protocol,start_port,end_port,status,updated_at) VALUES('$(esc "$user")','$(esc "$proto")',$start,$end,'active',CURRENT_TIMESTAMP);"
+  sqlite3 "$TUNNEL_DB" "INSERT INTO events(event,username,protocol,payload) VALUES('udp.rule.assigned','$(esc "$user")','$(esc "$proto")','{\"start_port\":$start,\"end_port\":$end}');"
+  echo "assigned $user $proto $start-$end"
+}
+import_file(){
+  [ -f "$MAP_FILE" ] || { echo "map file not found: $MAP_FILE" >&2; exit 1; }
+  while read -r user proto start end note; do
+    [ -n "${user:-}" ] || continue
+    [[ "$user" == \#* ]] && continue
+    proto="${proto:-zivpn}"; end="${end:-$start}"
+    assign_rule "$user" "$start" "$end" "$proto" >/dev/null
+  done < "$MAP_FILE"
+  echo "imported $MAP_FILE"
+}
+auto_from_accounts(){
+  local pool start end width next used p q user proto
+  pool="$(get_env ZIVPN_PORT_POOL)"; [ -n "$pool" ] || pool="6000-10008"
+  start="${pool%-*}"; end="${pool#*-}"; width="${ZIVPN_PORTS_PER_USER:-10}"; next="$start"
+  sqlite3 -noheader -separator '|' "$TUNNEL_DB" "SELECT username,protocol FROM accounts WHERE status='active' AND protocol IN ('zivpn','udp','udpcustom') AND username NOT IN (SELECT username FROM udp_port_rules WHERE status='active');" | while IFS='|' read -r user proto; do
+    [ -n "$user" ] || continue
+    while :; do
+      q=$(( next + width - 1 )); [ "$q" -gt "$end" ] && { echo "pool exhausted at $user" >&2; exit 0; }
+      used="$(sqlite3 "$TUNNEL_DB" "SELECT COUNT(*) FROM udp_port_rules WHERE status='active' AND NOT ($q < start_port OR $next > end_port);")"
+      if [ "${used:-0}" -eq 0 ]; then assign_rule "$user" "$next" "$q" "${proto:-zivpn}"; next=$((q+1)); break; fi
+      next=$((q+1))
+    done
+  done
+}
+init_db
+case "${1:-}" in
+  import-file) import_file ;;
+  assign) assign_rule "${2:?username}" "${3:?start_port}" "${4:-$3}" "${5:-zivpn}" ;;
+  release) sqlite3 "$TUNNEL_DB" "UPDATE udp_port_rules SET status='released',updated_at=CURRENT_TIMESTAMP WHERE username='$(esc "${2:?username}")' AND protocol='$(esc "${3:-zivpn}")';"; echo "released ${2}" ;;
+  list) sqlite3 -header -column "$TUNNEL_DB" "SELECT username,protocol,start_port,end_port,status,updated_at FROM udp_port_rules ORDER BY start_port;" ;;
+  json) sqlite3 -json "$TUNNEL_DB" "SELECT username,protocol,start_port,end_port,status,updated_at FROM udp_port_rules ORDER BY start_port;" ;;
+  auto-from-accounts) auto_from_accounts ;;
+  *) usage; exit 1 ;;
+esac

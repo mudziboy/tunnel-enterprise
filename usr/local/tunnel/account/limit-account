@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+
+protocol="$(account_select_protocol)" || { print_err "Protocol tidak valid"; exit 1; }
+read -rp "Username: " username
+require_valid_username "$username"
+
+if ! db_account_exists "$username" "$protocol"; then
+  print_err "Akun tidak ditemukan"
+  exit 1
+fi
+
+read -rp "Quota GB, 0 unlimited: " quota
+quota="${quota:-0}"
+is_valid_quota_gb "$quota" || { print_err "Quota tidak valid"; exit 1; }
+
+read -rp "IP limit, 0 unlimited: " iplimit
+iplimit="${iplimit:-0}"
+is_valid_ip_limit "$iplimit" || { print_err "IP limit tidak valid"; exit 1; }
+
+if account_dispatcher_exists limit "$protocol"; then
+  account_dispatch limit "$protocol" "$username" "$quota" "$iplimit"
+else
+  print_warn "Dispatcher protocol belum aktif. Limit hanya diperbarui di database."
+fi
+
+db_update_account_limit "$username" "$protocol" "$quota" "$iplimit"
+account_id="$(db_account_id "$username" "$protocol")"
+db_log_event "$account_id" "$username" "$protocol" "limit" "quota_gb=$quota ip_limit=$iplimit"
+audit_log "local" "limit-account" "$username/$protocol" "quota_gb=$quota ip_limit=$iplimit"
+
+print_ok "Limit diperbarui"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+printf "%-24s %-16s\n" "USERNAME" "EXPIRED"
+while IFS=: read -r user _ uid _; do
+  if [ "$uid" -ge 1000 ] 2>/dev/null && [ "$user" != "nobody" ]; then
+    exp="$(chage -l "$user" 2>/dev/null | awk -F': ' '/Account expires/{print $2}')"
+    printf "%-24s %-16s\n" "$user" "$exp"
+  fi
+done < /etc/passwd

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/config
+load_tunnel_config
+
+port_is_listening_tcp() {
+  ss -lnt | awk '{print $4}' | grep -Eq "[:.]${1}$"
+}
+
+port_is_listening_udp() {
+  ss -lnu | awk '{print $4}' | grep -Eq "[:.]${1}$"
+}
+
+show_port_map() {
+  cat <<EOF
+SSH                     ${SSH_PORT:-22}/tcp
+Dropbear                ${DROPBEAR_PORTS:-109,143}/tcp
+HTTP                    ${HTTP_PORT:-80}/tcp
+HTTPS                   ${HTTPS_PORT:-443}/tcp
+OpenVPN TCP             ${OPENVPN_TCP_PORT:-1194}/tcp
+OpenVPN UDP             ${OPENVPN_UDP_PORT:-2200}/udp
+Xray VLESS WS           ${XRAY_VLESS_WS_PORT:-10001}/tcp
+Xray VMess WS           ${XRAY_VMESS_WS_PORT:-10002}/tcp
+Xray Trojan WS          ${XRAY_TROJAN_WS_PORT:-10003}/tcp
+Xray Shadowsocks WS     ${XRAY_SHADOWSOCKS_WS_PORT:-10004}/tcp
+Xray VLESS gRPC         ${XRAY_VLESS_GRPC_PORT:-10005}/tcp
+Xray VMess gRPC         ${XRAY_VMESS_GRPC_PORT:-10006}/tcp
+Xray Trojan gRPC        ${XRAY_TROJAN_GRPC_PORT:-10007}/tcp
+Xray Shadowsocks gRPC   ${XRAY_SHADOWSOCKS_GRPC_PORT:-10008}/tcp
+Xray Reality            ${XRAY_REALITY_PORT:-1443}/tcp
+ZiVPN                   ${ZIVPN_PORT:-5667}/udp
+Tunnel API              ${TUNNEL_API_PORT:-5889}/tcp
+Hysteria2               ${HYSTERIA2_PORT:-8443}/udp
+TUIC                    ${TUIC_PORT:-4433}/udp
+WireGuard               ${WIREGUARD_PORT:-51820}/udp
+EOF
+}

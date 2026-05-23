@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+DB="/etc/tunnel/tunnel.db"
+POOL_ENV="/etc/tunnel/wireguard-pool.env"
+[ -f "$POOL_ENV" ] && . "$POOL_ENV"
+CIDR="${WG_CLIENT_CIDR:-10.66.66.0/24}"
+base="${CIDR%.*}"
+cmd="${1:-next}"
+ensure(){
+  sqlite3 "$DB" "CREATE TABLE IF NOT EXISTS wireguard_ip_pool (client_ip TEXT PRIMARY KEY,username TEXT DEFAULT '',status TEXT DEFAULT 'free',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);"
+}
+case "$cmd" in
+  init)
+    ensure
+    for i in $(seq 2 254); do
+      sqlite3 "$DB" "INSERT OR IGNORE INTO wireguard_ip_pool(client_ip,status) VALUES('$base.$i','free');"
+    done
+    echo "wireguard ip pool ready: $CIDR"
+    ;;
+  next)
+    ensure
+    sqlite3 "$DB" "SELECT client_ip FROM wireguard_ip_pool WHERE status='free' ORDER BY client_ip LIMIT 1;"
+    ;;
+  assign)
+    ensure
+    user="${2:?username required}"
+    ip="${3:-$(sqlite3 "$DB" "SELECT client_ip FROM wireguard_ip_pool WHERE status='free' ORDER BY client_ip LIMIT 1;")}"
+    [ -n "$ip" ] || { echo "no free wireguard ip" >&2; exit 1; }
+    sqlite3 "$DB" "INSERT OR IGNORE INTO wireguard_ip_pool(client_ip,status) VALUES('$ip','free'); UPDATE wireguard_ip_pool SET username='$user',status='used',updated_at=CURRENT_TIMESTAMP WHERE client_ip='$ip';"
+    echo "$ip"
+    ;;
+  release)
+    ensure
+    user="${2:?username required}"
+    sqlite3 "$DB" "UPDATE wireguard_ip_pool SET username='',status='free',updated_at=CURRENT_TIMESTAMP WHERE username='$user';"
+    ;;
+  list)
+    ensure
+    sqlite3 -header -column "$DB" "SELECT * FROM wireguard_ip_pool ORDER BY client_ip;"
+    ;;
+  json)
+    ensure
+    sqlite3 -json "$DB" "SELECT * FROM wireguard_ip_pool ORDER BY client_ip;"
+    ;;
+  *)
+    echo "Usage: ip-pool-manager {init|next|assign <user> [ip]|release <user>|list|json}" >&2
+    exit 1
+    ;;
+esac

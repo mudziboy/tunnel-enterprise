@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/config
+
+load_tunnel_config
+
+ZIVPN_PORT="${ZIVPN_PORT:-5667}"
+START="${ZIVPN_UDP_RANGE_START:-6000}"
+END="${ZIVPN_UDP_RANGE_END:-19999}"
+iface="$(ip -4 route ls | awk '/default/ {for(i=1;i<=NF;i++){if($i=="dev"){print $(i+1); exit}}}' | head -n1)"
+[ -n "$iface" ] || iface="eth0"
+
+while iptables -t nat -C PREROUTING -i "$iface" -p udp --dport "$START:$END" -j DNAT --to-destination ":$ZIVPN_PORT" 2>/dev/null; do
+  iptables -t nat -D PREROUTING -i "$iface" -p udp --dport "$START:$END" -j DNAT --to-destination ":$ZIVPN_PORT"
+done
+
+iptables -t nat -I PREROUTING 1 -i "$iface" -p udp --dport "$START:$END" -j DNAT --to-destination ":$ZIVPN_PORT"
+
+if iptables -t nat -C POSTROUTING -j MASQUERADE 2>/dev/null; then
+  true
+else
+  iptables -t nat -A POSTROUTING -j MASQUERADE
+fi
+
+if command -v iptables-save >/dev/null 2>&1; then
+  mkdir -p /etc/iptables
+  iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+fi
+
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow "$START:$END/udp" >/dev/null 2>&1 || true
+  ufw allow "$ZIVPN_PORT/udp" >/dev/null 2>&1 || true
+fi
+
+echo "ZiVPN firewall aktif: UDP $START-$END -> $ZIVPN_PORT"

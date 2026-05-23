@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+db_init >/dev/null 2>&1
+now="$(date '+%F %T')"
+sql(){ sqlite3 "$TUNNEL_DB" "$1" 2>/dev/null || true; }
+esc(){ db_escape "$1"; }
+insert_session(){
+  local u="$1" p="$2" ip="$3" source="${4:-collector}" raw="${5:-}"
+  [ -n "$u" ] && [ -n "$p" ] && [ -n "$ip" ] || return 0
+  ip="${ip#[}"; ip="${ip%%]*}"; ip="${ip%%:*}"
+  [ -n "$ip" ] || return 0
+  sql "INSERT INTO sessions(username,protocol,remote_ip,connected_at,last_seen_at,status,source,raw) VALUES('$(esc "$u")','$(esc "$p")','$(esc "$ip")','$now','$now','active','$(esc "$source")','$(esc "$raw")');"
+}
+collect_ssh(){
+  who 2>/dev/null | awk '{gsub(/[()]/,"",$5); if($1 && $5) print $1"\t"$5}' | while IFS=$'\t' read -r u ip; do insert_session "$u" ssh "$ip" who ""; done
+  ss -tnp 2>/dev/null | awk '/ESTAB/ && /sshd/ {print $5"\t"$0}' | while IFS=$'\t' read -r addr raw; do ip="${addr%:*}"; u="unknown"; insert_session "$u" ssh "$ip" ss "$raw"; done
+}
+collect_dropbear(){
+  ps -eo user:32,args 2>/dev/null | awk '/dropbear/ && /@/ {print}' | while read -r raw; do
+    u="$(printf '%s' "$raw" | awk '{print $1}')"
+    ip="$(printf '%s' "$raw" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)"
+    [ -n "$ip" ] && insert_session "$u" dropbear "$ip" ps "$raw"
+  done
+}
+collect_xray(){
+  for file in /var/log/xray/access.log /usr/local/tunnel/logs/xray-access.log; do
+    [ -f "$file" ] || continue
+    tail -n 3000 "$file" 2>/dev/null | grep -E 'email:|accepted|from' | while read -r raw; do
+      u="$(printf '%s' "$raw" | sed -n 's/.*email: *\([^ ]*\).*/\1/p' | head -1)"
+      [ -n "$u" ] || u="$(printf '%s' "$raw" | grep -Eo 'email:[^ ]+' | cut -d: -f2 | head -1)"
+      ip="$(printf '%s' "$raw" | grep -Eo 'from ([0-9]{1,3}\.){3}[0-9]{1,3}' | awk '{print $2}' | head -1)"
+      [ -n "$ip" ] || ip="$(printf '%s' "$raw" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]+' | head -1 | sed 's/:.*//')"
+      [ -n "$u" ] && [ -n "$ip" ] && insert_session "$u" xray "$ip" xray-log "$raw"
+    done
+  done
+}
+collect_wireguard(){
+  command -v wg >/dev/null 2>&1 || return 0
+  wg show all endpoints 2>/dev/null | while read -r iface peer endpoint; do
+    [ -n "${peer:-}" ] && [ -n "${endpoint:-}" ] || continue
+    ip="${endpoint%:*}"
+    insert_session "wg:$peer" wireguard "$ip" wg "$iface $peer $endpoint"
+  done
+}
+collect_common_logs(){
+  for proto in zivpn sing-box hysteria2 tuic; do
+    for file in /var/log/${proto}.log /usr/local/tunnel/logs/${proto}.log /var/log/${proto}/*.log; do
+      [ -f "$file" ] || continue
+      tail -n 1500 "$file" 2>/dev/null | grep -Eo '([A-Za-z0-9._-]{3,32}).*(([0-9]{1,3}\.){3}[0-9]{1,3})' | while read -r raw; do
+        u="$(printf '%s' "$raw" | awk '{print $1}')"
+        ip="$(printf '%s' "$raw" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | tail -1)"
+        insert_session "$u" "$proto" "$ip" common-log "$raw"
+      done
+    done
+  done
+}
+sql "DELETE FROM sessions WHERE status='active';"
+collect_ssh
+collect_dropbear
+collect_xray
+collect_wireguard
+collect_common_logs
+sqlite3 -separator $'\t' "$TUNNEL_DB" "SELECT username,protocol,COUNT(DISTINCT remote_ip),GROUP_CONCAT(DISTINCT remote_ip) FROM sessions WHERE status='active' GROUP BY username,protocol;" 2>/dev/null | while IFS=$'\t' read -r u p c raw; do
+  sql "INSERT INTO session_snapshots(username,protocol,ip_count,raw) VALUES('$(esc "$u")','$(esc "$p")',${c:-0},'$(esc "$raw")');"
+done
+case "${1:-table}" in
+  --json|json) sqlite3 -json "$TUNNEL_DB" "SELECT username,protocol,COUNT(DISTINCT remote_ip) ip_count,GROUP_CONCAT(DISTINCT remote_ip) ips FROM sessions WHERE status='active' GROUP BY username,protocol ORDER BY username,protocol;" ;;
+  *) sqlite3 -header -column "$TUNNEL_DB" "SELECT username,protocol,COUNT(DISTINCT remote_ip) ip_count,GROUP_CONCAT(DISTINCT remote_ip) ips FROM sessions WHERE status='active' GROUP BY username,protocol ORDER BY username,protocol;" ;;
+esac

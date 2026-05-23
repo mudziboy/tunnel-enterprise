@@ -1,0 +1,8 @@
+{
+  "name": "tunnel-go-node-agent",
+  "version": "5.5.0",
+  "main": "api-server.js",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

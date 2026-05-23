@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/logger
+
+render_backup_file() {
+  local file="$1"
+  local backup_dir="${2:-/etc/tunnel/runtime/backups}"
+  mkdir -p "$backup_dir"
+  if [ -f "$file" ]; then
+    cp -a "$file" "$backup_dir/$(basename "$file").$(date +%Y%m%d-%H%M%S).bak"
+  fi
+}
+
+render_test_xray() {
+  local config="$1"
+  if command -v xray >/dev/null 2>&1; then
+    xray run -test -config "$config" >/tmp/tunnel-xray-test.log 2>&1
+  else
+    jq empty "$config" >/tmp/tunnel-xray-test.log 2>&1
+  fi
+}
+
+safe_apply_config() {
+  local source="$1"
+  local target="$2"
+  local test_cmd="$3"
+  local service="${4:-}"
+  local backup_dir="/etc/tunnel/runtime/rollback"
+  local backup="$backup_dir/$(basename "$target").$(date +%Y%m%d-%H%M%S).bak"
+
+  mkdir -p "$backup_dir"
+  mkdir -p "$(dirname "$target")"
+
+  if [ -f "$target" ]; then
+    cp -a "$target" "$backup"
+  fi
+
+  cp -f "$source" "$target"
+
+  if ! bash -c "$test_cmd"; then
+    if [ -f "$backup" ]; then
+      cp -f "$backup" "$target"
+    fi
+    error_log "safe_apply_config failed target=$target service=$service"
+    return 1
+  fi
+
+  if [ -n "$service" ]; then
+    if systemctl list-unit-files "$service.service" >/dev/null 2>&1; then
+      if ! systemctl restart "$service"; then
+        if [ -f "$backup" ]; then
+          cp -f "$backup" "$target"
+          systemctl restart "$service" >/dev/null 2>&1 || true
+        fi
+        error_log "service restart failed target=$target service=$service"
+        return 1
+      fi
+    fi
+  fi
+
+  audit_log "system" "safe-apply-config" "$target" "service=$service"
+}

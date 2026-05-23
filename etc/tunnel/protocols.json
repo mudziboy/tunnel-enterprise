@@ -1,0 +1,96 @@
+{
+  "version": "5.5",
+  "protocols": {
+    "ssh": {
+      "engine": "linux",
+      "title": "SSH / WebSocket",
+      "category": "legacy",
+      "account_mode": "linux_user",
+      "enabled": true
+    },
+    "vmess_ws": {
+      "engine": "xray",
+      "title": "VMess WebSocket",
+      "category": "xray",
+      "account_mode": "uuid",
+      "enabled": true
+    },
+    "vless_ws": {
+      "engine": "xray",
+      "title": "VLess WebSocket",
+      "category": "xray",
+      "account_mode": "uuid",
+      "enabled": true
+    },
+    "trojan_ws": {
+      "engine": "xray",
+      "title": "Trojan WebSocket",
+      "category": "xray",
+      "account_mode": "password",
+      "enabled": true
+    },
+    "shadowsocks": {
+      "engine": "xray",
+      "title": "Shadowsocks",
+      "category": "xray",
+      "account_mode": "password",
+      "enabled": true
+    },
+    "zivpn": {
+      "engine": "zivpn",
+      "title": "ZiVPN UDP",
+      "category": "udp",
+      "account_mode": "user_password",
+      "enabled": true
+    },
+    "hysteria2": {
+      "engine": "hysteria2",
+      "title": "Hysteria2 UDP/QUIC",
+      "category": "udp_quic",
+      "account_mode": "password",
+      "enabled": true
+    },
+    "tuic": {
+      "engine": "tuic",
+      "title": "TUIC UDP/QUIC",
+      "category": "udp_quic",
+      "account_mode": "uuid_password",
+      "enabled": true
+    },
+    "wireguard": {
+      "engine": "wireguard",
+      "title": "WireGuard VPN",
+      "category": "vpn",
+      "account_mode": "peer",
+      "enabled": true
+    },
+    "singbox_vless_ws": {
+      "engine": "sing-box",
+      "title": "Sing-box VLess WS",
+      "category": "sing-box",
+      "account_mode": "uuid",
+      "enabled": true
+    },
+    "singbox_trojan_ws": {
+      "engine": "sing-box",
+      "title": "Sing-box Trojan WS",
+      "category": "sing-box",
+      "account_mode": "password",
+      "enabled": true
+    },
+    "singbox_hysteria2": {
+      "engine": "sing-box",
+      "title": "Sing-box Hysteria2",
+      "category": "sing-box",
+      "account_mode": "password",
+      "enabled": true
+    },
+    "singbox_tuic": {
+      "engine": "sing-box",
+      "title": "Sing-box TUIC",
+      "category": "sing-box",
+      "account_mode": "uuid_password",
+      "enabled": true
+    }
+  }
+}

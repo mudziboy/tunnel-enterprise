@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if command -v nft >/dev/null 2>&1; then
+  echo nft
+elif command -v iptables >/dev/null 2>&1; then
+  echo iptables
+else
+  echo none
+fi

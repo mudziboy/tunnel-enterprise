@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+. /usr/local/tunnel/lib/common 2>/dev/null || true
+apply_action(){
+  local user="$1" proto="$2" reason="$3"
+  mkdir -p /usr/local/tunnel/logs
+  printf '%s user=%s protocol=%s reason=%s\n' "$(date '+%F %T')" "$user" "$proto" "$reason" >> /usr/local/tunnel/logs/enforcement.log
+  case "$proto" in
+    ssh|openvpn)
+      usermod -L "$user" >/dev/null 2>&1 || true
+      pkill -KILL -u "$user" >/dev/null 2>&1 || true
+      ;;
+    dropbear)
+      usermod -L "$user" >/dev/null 2>&1 || true
+      pkill -KILL -u "$user" >/dev/null 2>&1 || true
+      ;;
+    vmess|vless|trojan|shadowsocks|xray)
+      /usr/local/tunnel/core/xray/render-xray-config >/dev/null 2>&1 || true
+      /usr/local/tunnel/tools/safe-reload xray >/dev/null 2>&1 || systemctl restart xray >/dev/null 2>&1 || true
+      ;;
+    sing-box|singbox)
+      /usr/local/tunnel/core/sing-box/render-sing-box-config >/dev/null 2>&1 || true
+      /usr/local/tunnel/tools/safe-reload sing-box >/dev/null 2>&1 || systemctl restart sing-box >/dev/null 2>&1 || true
+      ;;
+    zivpn|udp|udpcustom)
+      /usr/local/tunnel/core/udp-enforcer block "$user" >/dev/null 2>&1 || true
+      /usr/local/tunnel/core/zivpn/render-zivpn-config >/dev/null 2>&1 || true
+      systemctl restart zivpn >/dev/null 2>&1 || true
+      ;;
+    hysteria2)
+      /usr/local/tunnel/core/hysteria2/render-hysteria2-config >/dev/null 2>&1 || true
+      systemctl restart hysteria2 >/dev/null 2>&1 || true
+      ;;
+    tuic)
+      /usr/local/tunnel/core/tuic/render-tuic-config >/dev/null 2>&1 || true
+      systemctl restart tuic >/dev/null 2>&1 || true
+      ;;
+    wireguard)
+      /usr/local/tunnel/core/wireguard/render-wireguard-config >/dev/null 2>&1 || true
+      systemctl restart wg-quick@wg0 >/dev/null 2>&1 || true
+      ;;
+  esac
+}
+case "${1:-}" in
+  apply) apply_action "${2:?username}" "${3:?protocol}" "${4:-manual}" ;;
+  *) echo "Usage: enforcement-actions apply <username> <protocol> <reason>"; exit 1 ;;
+esac

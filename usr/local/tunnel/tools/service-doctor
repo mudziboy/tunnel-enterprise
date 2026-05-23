@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/service-map
+LOG=/usr/local/tunnel/logs/service-doctor.log
+mkdir -p /usr/local/tunnel/logs
+exec > >(tee -a "$LOG") 2>&1
+echo "TUNNEL GO SERVICE DOCTOR - $(date '+%F %T')"
+printf '%-14s %-4s %-24s %s\n' SERVICE STAT UNIT DETAIL
+for svc in $(service_list); do
+  stat="$(service_status_value "$svc" 2>/dev/null || echo OFF)"
+  unit="$(service_unit_name "$svc")"
+  detail=""
+  systemctl is-failed --quiet "$unit" 2>/dev/null && detail="FAILED: $(systemctl show -p Result --value "$unit" 2>/dev/null)"
+  printf '%-14s %-4s %-24s %s\n' "$svc" "$stat" "$unit" "$detail"
+  if command -v sqlite3 >/dev/null 2>&1 && [ -f /etc/tunnel/tunnel.db ]; then
+    sqlite3 /etc/tunnel/tunnel.db "INSERT OR REPLACE INTO service_status(service,status,detail,checked_at) VALUES('$svc','$stat','${detail//\'/\'\'}',CURRENT_TIMESTAMP);" 2>/dev/null || true
+  fi
+done
+echo
+echo "Critical checks:"
+[ -s /etc/tunnel/domain ] && DOMAIN="$(cat /etc/tunnel/domain)" || DOMAIN=""
+if [ -n "$DOMAIN" ] && command -v getent >/dev/null 2>&1; then
+  DIP="$(getent ahostsv4 "$DOMAIN" | awk 'NR==1{print $1}')"
+  VIP="$(curl -4fsS --max-time 3 https://ipv4.icanhazip.com 2>/dev/null | tr -d ' \t\r\n' || true)"
+  [ -n "$DIP" ] && [ -n "$VIP" ] && [ "$DIP" != "$VIP" ] && echo "WARN: domain $DOMAIN resolve ke $DIP, IP VPS $VIP" || true
+fi

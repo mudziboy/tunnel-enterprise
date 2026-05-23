@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+db_init >/dev/null 2>&1
+node_json="$(cat /etc/tunnel/node.json 2>/dev/null || echo '{}')"
+capacity="$(/usr/local/tunnel/node/node-capacity 2>/dev/null || echo '{}')"
+services="$(/usr/local/tunnel/tools/health-check --json 2>/dev/null || echo '[]')"
+now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+payload="$(jq -n --argjson node "$node_json" --argjson capacity "$capacity" --argjson services "$services" --arg time "$now" '{node:$node,capacity:$capacity,services:$services,time:$time}' 2>/dev/null || printf '{}')"
+mkdir -p /etc/tunnel/runtime
+printf '%s\n' "$payload" >/etc/tunnel/runtime/heartbeat.json
+sqlite3 "$TUNNEL_DB" "INSERT INTO events(event,node_id,payload) VALUES('node.heartbeat','$(jq -r '.node_id // empty' /etc/tunnel/node.json 2>/dev/null)','$(db_escape "$payload")');" 2>/dev/null || true
+panel="$(grep -E '^PANEL_URL=' /etc/tunnel/panel.env 2>/dev/null | cut -d= -f2- | tr -d '"')"
+secret="$(cat /etc/tunnel/node.secret 2>/dev/null || true)"
+if [ -n "$panel" ] && command -v curl >/dev/null 2>&1; then
+  curl -fsS -m 8 -H "x-node-secret: $secret" -H 'content-type: application/json' -d "$payload" "$panel/api/node-heartbeat" >/dev/null 2>&1 || true
+fi
+printf '%s\n' "$payload"

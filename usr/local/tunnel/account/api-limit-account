@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+protocol="$1"
+username="$2"
+quota="$3"
+iplimit="$4"
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+require_valid_protocol "$protocol"
+require_valid_username "$username"
+is_valid_quota_gb "$quota" || { echo "Invalid quota"; exit 1; }
+is_valid_ip_limit "$iplimit" || { echo "Invalid ip limit"; exit 1; }
+
+if ! db_account_exists "$username" "$protocol"; then
+  echo "Account not found"
+  exit 1
+fi
+
+db_update_account_limit "$username" "$protocol" "$quota" "$iplimit"
+account_id="$(db_account_id "$username" "$protocol")"
+db_log_event "$account_id" "$username" "$protocol" "api-limit" "quota_gb=$quota ip_limit=$iplimit"
+audit_log "api" "limit-account" "$username/$protocol" "quota_gb=$quota ip_limit=$iplimit"
+
+echo "Account limit updated"

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+
+require_root
+
+systemctl stop zivpn 2>/dev/null || true
+systemctl disable zivpn 2>/dev/null || true
+rm -f /etc/systemd/system/zivpn.service
+rm -f /usr/local/bin/zivpn
+/usr/local/tunnel/core/zivpn/remove-zivpn-firewall || true
+systemctl daemon-reload
+systemctl reset-failed
+
+print_ok "ZiVPN binary dan service dihapus. Config /etc/zivpn tetap disimpan."

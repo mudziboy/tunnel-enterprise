@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+install -m 755 /usr/local/tunnel/guard/tunnel-guard /usr/local/bin/tunnel-guard
+cat >/etc/systemd/system/tunnel-guard.service <<'EOF'
+[Unit]
+Description=Tunnel Go Guard Enforcement
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tunnel-guard
+EOF
+cat >/etc/systemd/system/tunnel-guard.timer <<'EOF'
+[Unit]
+Description=Run Tunnel Go Guard every minute
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+AccuracySec=10
+Unit=tunnel-guard.service
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now tunnel-guard.timer
+printf 'Tunnel Guard timer aktif.\n'

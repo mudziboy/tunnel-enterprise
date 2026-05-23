@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/database
+
+require_root
+load_tunnel_config
+db_init
+
+mkdir -p /etc/wireguard /etc/tunnel/runtime/wireguard
+python3 /usr/local/tunnel/core/wireguard/render-wireguard-conf.py \
+  --db "$TUNNEL_DB" \
+  --port "${WIREGUARD_PORT:-51820}" \
+  --output /etc/tunnel/runtime/wireguard/wg0.conf
+
+if [ -f /etc/wireguard/wg0.conf ]; then
+  cp -a /etc/wireguard/wg0.conf "/etc/tunnel/runtime/wireguard/wg0.conf.$(date +%Y%m%d-%H%M%S).bak"
+fi
+
+install -m 0600 /etc/tunnel/runtime/wireguard/wg0.conf /etc/wireguard/wg0.conf
+
+if systemctl list-unit-files wg-quick@.service >/dev/null 2>&1; then
+  systemctl restart wg-quick@wg0 || true
+fi
+
+print_ok "Config WireGuard diterapkan"

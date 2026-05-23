@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+
+require_root
+
+backup_dir="/etc/tunnel/backups"
+mkdir -p "$backup_dir"
+
+echo "Backup tersedia:"
+ls -1 "$backup_dir"/*.tar.gz 2>/dev/null || true
+echo ""
+read -rp "Path backup yang akan direstore: " file
+
+if [ ! -f "$file" ]; then
+  print_err "File tidak ditemukan"
+  exit 1
+fi
+
+confirm "Restore dari $file?" || exit 0
+
+tar -xzf "$file" -C /
+systemctl daemon-reload || true
+print_ok "Restore selesai"

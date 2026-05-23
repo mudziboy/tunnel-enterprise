@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+CACHE=/etc/tunnel/runtime/vps-info.json
+mkdir -p /etc/tunnel/runtime
+public_ip(){ curl -4fsS --max-time 4 https://ipv4.icanhazip.com 2>/dev/null | tr -d ' \t\r\n' || hostname -I | awk '{print $1}'; }
+json_escape(){ python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))' 2>/dev/null || printf '"%s"' "$1"; }
+IP="$(public_ip)"
+DATA=""
+if command -v curl >/dev/null 2>&1; then DATA="$(curl -fsS --max-time 5 "https://ipinfo.io/${IP}/json" 2>/dev/null || true)"; fi
+if [ -n "$DATA" ] && command -v jq >/dev/null 2>&1; then
+  PROVIDER="$(printf '%s' "$DATA" | jq -r '.org // "Unknown"' | sed 's/^[A-Z][A-Z0-9]* //')"
+  CITY="$(printf '%s' "$DATA" | jq -r '.city // "Unknown"')"
+  REGION="$(printf '%s' "$DATA" | jq -r '.region // "Unknown"')"
+  COUNTRY="$(printf '%s' "$DATA" | jq -r '.country // "Unknown"')"
+else
+  PROVIDER="Unknown"; CITY="Unknown"; REGION="Unknown"; COUNTRY="Unknown"
+fi
+CPU="$(nproc 2>/dev/null || echo 1)"
+RAM="$(free -m 2>/dev/null | awk 'NR==2{print $2}' || echo 0)"
+DISK="$(df -h / 2>/dev/null | awk 'NR==2{print $2}' || echo 0)"
+KERNEL="$(uname -r)"
+UPTIME="$(uptime -p 2>/dev/null || echo '-')"
+cat > "$CACHE" <<EOF
+{"public_ip":"$IP","provider":"$PROVIDER","city":"$CITY","region":"$REGION","country":"$COUNTRY","cpu_cores":$CPU,"ram_mb":$RAM,"disk":"$DISK","kernel":"$KERNEL","uptime":"$UPTIME","checked_at":"$(date -Iseconds)"}
+EOF
+if [ "${1:-}" = "--json" ]; then cat "$CACHE"; else
+  echo "TUNNEL GO VPS INFO"
+  echo "IP          : $IP"
+  echo "Data Center : $PROVIDER • $CITY, $REGION ($COUNTRY)"
+  echo "CPU/RAM     : ${CPU} core / ${RAM} MB"
+  echo "Disk        : $DISK"
+  echo "Kernel      : $KERNEL"
+  echo "Uptime      : $UPTIME"
+fi

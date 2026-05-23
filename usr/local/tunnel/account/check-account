@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/account
+
+account_init
+protocol="$(account_select_protocol)" || { print_err "Protocol tidak valid"; exit 1; }
+read -rp "Username: " username
+require_valid_username "$username"
+
+if db_account_exists "$username" "$protocol"; then
+  db_detail_account "$username" "$protocol"
+else
+  print_err "Akun tidak ditemukan"
+  exit 1
+fi

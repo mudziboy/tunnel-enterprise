@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+protocol="$1"
+username="$2"
+days="$3"
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+require_valid_protocol "$protocol"
+require_valid_username "$username"
+is_valid_days "$days" || { echo "Invalid days"; exit 1; }
+
+if ! db_account_exists "$username" "$protocol"; then
+  echo "Account not found"
+  exit 1
+fi
+
+current="$(sqlite3 "$TUNNEL_DB" "SELECT expired_at FROM accounts WHERE username='$(db_escape "$username")' AND protocol='$(db_escape "$protocol")';")"
+today="$(date -u '+%Y-%m-%d')"
+base="$current"
+if [[ "$base" < "$today" ]]; then base="$today"; fi
+expired="$(date -u -d "$base +$days days" '+%Y-%m-%d')"
+
+db_update_account_expiry "$username" "$protocol" "$expired"
+account_id="$(db_account_id "$username" "$protocol")"
+db_log_event "$account_id" "$username" "$protocol" "api-renew" "days=$days expired=$expired"
+audit_log "api" "renew-account" "$username/$protocol" "days=$days expired=$expired"
+
+echo "Account renewed"
+echo "expired=$expired"

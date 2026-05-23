@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[ "$(id -u)" -eq 0 ] || { echo "Jalankan sebagai root" >&2; exit 1; }
+cd /usr/local/tunnel/api
+if command -v npm >/dev/null 2>&1; then npm install --omit=dev >/dev/null 2>&1 || npm install --production; fi
+[ -s /etc/tunnel/api.key ] || (openssl rand -hex 32 > /etc/tunnel/api.key 2>/dev/null || tr -dc A-Fa-f0-9 </dev/urandom | head -c 64 > /etc/tunnel/api.key)
+chmod 600 /etc/tunnel/api.key
+cat > /etc/systemd/system/tunnel-api.service <<'UNIT'
+[Unit]
+Description=Tunnel Go Node Agent API
+After=network-online.target
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/tunnel/api
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /usr/local/tunnel/api/api-server.js
+Restart=always
+RestartSec=3
+LimitNOFILE=1000000
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now tunnel-api >/dev/null 2>&1 || true
+echo "Tunnel Go API aktif. API key: /etc/tunnel/api.key"

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+username="${1:-trial-$(date +%H%M%S)}"
+minutes="${2:-60}"
+iplimit="${3:-1}"
+secret="${4:-$username}"
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+
+expired="$(date -u '+%Y-%m-%d')"
+if ! db_account_exists "$username" "zivpn"; then
+  db_add_account "$username" "zivpn" "udp" "" "$secret" "0" "$iplimit" "$expired" "trial" "duration_minutes=$minutes" "local"
+  account_id="$(db_account_id "$username" "zivpn")"
+  db_log_event "$account_id" "$username" "zivpn" "trial" "minutes=$minutes"
+fi
+
+mkdir -p /etc/tunnel/users/zivpn
+printf '%s\n' "$iplimit" > "/etc/tunnel/users/zivpn/$username.iplimit"
+/usr/local/tunnel/core/zivpn/render-zivpn-config
+
+( sleep "$((minutes * 60))"; /usr/local/tunnel/core/zivpn/delete-zivpn "$username" >/dev/null 2>&1 || true ) >/dev/null 2>&1 &
+
+echo "Trial ZiVPN siap"
+echo "Username : $username"
+echo "Password : $secret"
+echo "Durasi   : $minutes menit"
+echo "Port     : ${ZIVPN_PORT:-5667}"
+echo "UDP Range: ${ZIVPN_UDP_RANGE_START:-6000}-${ZIVPN_UDP_RANGE_END:-19999}"

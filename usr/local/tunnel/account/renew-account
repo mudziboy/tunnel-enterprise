@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+
+protocol="$(account_select_protocol)" || { print_err "Protocol tidak valid"; exit 1; }
+read -rp "Username: " username
+require_valid_username "$username"
+
+if ! db_account_exists "$username" "$protocol"; then
+  print_err "Akun tidak ditemukan: $username/$protocol"
+  exit 1
+fi
+
+read -rp "Tambah hari: " days
+is_valid_days "$days" || { print_err "Hari tidak valid"; exit 1; }
+
+current="$(sqlite3 "$TUNNEL_DB" "SELECT expired_at FROM accounts WHERE username='$(db_escape "$username")' AND protocol='$(db_escape "$protocol")';")"
+today="$(date -u '+%Y-%m-%d')"
+base="$current"
+if [[ "$base" < "$today" ]]; then base="$today"; fi
+expired="$(date -u -d "$base +$days days" '+%Y-%m-%d')"
+
+if account_dispatcher_exists renew "$protocol"; then
+  account_dispatch renew "$protocol" "$username" "$days" "$expired"
+else
+  print_warn "Dispatcher protocol belum aktif. Data hanya diperbarui di database."
+fi
+
+db_update_account_expiry "$username" "$protocol" "$expired"
+account_id="$(db_account_id "$username" "$protocol")"
+db_log_event "$account_id" "$username" "$protocol" "renew" "days=$days expired=$expired"
+audit_log "local" "renew-account" "$username/$protocol" "days=$days expired=$expired"
+
+print_ok "Akun diperpanjang"
+echo "Expired baru: $expired"

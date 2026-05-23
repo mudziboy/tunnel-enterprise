@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if ! command -v xray >/dev/null 2>&1; then
+  echo "[ERR] Xray belum terinstall. Jalankan Xray Manager -> Install Xray terlebih dahulu."
+  exit 1
+fi
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/database
+. /usr/local/tunnel/lib/render
+
+require_root
+load_tunnel_config
+db_init
+
+render_protocol() {
+  local protocol="$1"
+  local tmp="/etc/tunnel/runtime/${protocol}-config.json"
+  local target="/etc/xray/${protocol}/config.json"
+  local service="${protocol}@config"
+  local ws_port grpc_port api_port ws_path grpc_service
+
+  case "$protocol" in
+    vmess)
+      ws_port="${XRAY_VMESS_WS_PORT:-10002}"
+      grpc_port="${XRAY_VMESS_GRPC_PORT:-10006}"
+      api_port="${XRAY_API_VMESS_PORT:-20001}"
+      ws_path="/vmess"
+      grpc_service="vmess-grpc"
+      ;;
+    vless)
+      ws_port="${XRAY_VLESS_WS_PORT:-10001}"
+      grpc_port="${XRAY_VLESS_GRPC_PORT:-10005}"
+      api_port="${XRAY_API_VLESS_PORT:-20002}"
+      ws_path="/vless"
+      grpc_service="vless-grpc"
+      ;;
+    trojan)
+      ws_port="${XRAY_TROJAN_WS_PORT:-10003}"
+      grpc_port="${XRAY_TROJAN_GRPC_PORT:-10007}"
+      api_port="${XRAY_API_TROJAN_PORT:-20003}"
+      ws_path="/trojan-ws"
+      grpc_service="trojan-grpc"
+      ;;
+    shadowsocks)
+      ws_port="${XRAY_SHADOWSOCKS_WS_PORT:-10004}"
+      grpc_port="${XRAY_SHADOWSOCKS_GRPC_PORT:-10008}"
+      api_port="${XRAY_API_SHADOWSOCKS_PORT:-20004}"
+      ws_path="/ss-ws"
+      grpc_service="ss-grpc"
+      ;;
+    *)
+      print_err "Protocol Xray tidak valid: $protocol"
+      exit 1
+      ;;
+  esac
+
+  mkdir -p /etc/tunnel/runtime "/etc/xray/$protocol"
+
+  python3 /usr/local/tunnel/core/xray/render-xray-json.py \
+    --db "$TUNNEL_DB" \
+    --protocol "$protocol" \
+    --ws-port "$ws_port" \
+    --grpc-port "$grpc_port" \
+    --api-port "$api_port" \
+    --ws-path "$ws_path" \
+    --grpc-service "$grpc_service" \
+    --output "$tmp"
+
+  jq empty "$tmp"
+
+  safe_apply_config "$tmp" "$target" "jq empty '$target' && xray run -test -config '$target'" "$service" || {
+    print_err "Gagal apply config $protocol"
+    exit 1
+  }
+
+  print_ok "Config $protocol diterapkan"
+}
+
+if [ "${1:-}" = "--all" ]; then
+  render_protocol vless
+  render_protocol vmess
+  render_protocol trojan
+  render_protocol shadowsocks
+else
+  protocol="${1:-}"
+  [ -n "$protocol" ] || { print_err "Gunakan: render-xray-config --all atau render-xray-config <protocol>"; exit 1; }
+  render_protocol "$protocol"
+fi

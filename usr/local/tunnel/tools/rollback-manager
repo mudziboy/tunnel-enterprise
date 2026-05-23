@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+BACKUP_DIR=/etc/tunnel/backups/config
+mkdir -p "$BACKUP_DIR"
+backup_config(){ local svc="$1" ts; ts="$(date +%Y%m%d-%H%M%S)"; tar -czf "$BACKUP_DIR/${svc}-${ts}.tar.gz" /etc/nginx /etc/haproxy /etc/xray /etc/sing-box /etc/wireguard /etc/tunnel 2>/dev/null || true; echo "$BACKUP_DIR/${svc}-${ts}.tar.gz"; }
+restore_latest(){ local svc="$1" file; file="$(ls -1t "$BACKUP_DIR"/${svc}-*.tar.gz 2>/dev/null | head -n1 || true)"; [ -n "$file" ] || { echo "Backup tidak ditemukan" >&2; exit 1; }; tar -xzf "$file" -C / 2>/dev/null || true; echo "Restored $file"; }
+case "${1:-}" in
+  backup) backup_config "${2:-manual}";;
+  restore) restore_latest "${2:-manual}";;
+  *) echo "Usage: rollback-manager backup <service>|restore <service>"; exit 1;;
+esac

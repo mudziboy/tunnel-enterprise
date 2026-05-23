@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+TUNNEL_CONFIG_DIR="${TUNNEL_CONFIG_DIR:-/etc/tunnel}"
+CONFIG_ENV="$TUNNEL_CONFIG_DIR/config.env"
+PORTS_ENV="$TUNNEL_CONFIG_DIR/ports.env"
+
+load_tunnel_config() {
+  if [ -f "$CONFIG_ENV" ]; then
+    set -a
+    . "$CONFIG_ENV"
+    set +a
+  fi
+
+  if [ -f "$PORTS_ENV" ]; then
+    set -a
+    . "$PORTS_ENV"
+    set +a
+  fi
+}
+
+get_domain() {
+  local file="${TUNNEL_DOMAIN_FILE:-/etc/tunnel/domain}"
+  if [ -f "$file" ]; then
+    tr -d ' \t\r\n' < "$file"
+  fi
+}
+
+set_domain() {
+  local domain="$1"
+  mkdir -p "$TUNNEL_CONFIG_DIR"
+  printf '%s\n' "$domain" > "$TUNNEL_CONFIG_DIR/domain"
+  chmod 644 "$TUNNEL_CONFIG_DIR/domain"
+}
+
+get_config_value() {
+  local key="$1"
+  local file="${2:-$CONFIG_ENV}"
+  grep -E "^${key}=" "$file" 2>/dev/null | tail -n1 | cut -d= -f2- | sed 's/^"//;s/"$//'
+}
+
+set_config_value() {
+  local key="$1"
+  local value="$2"
+  local file="${3:-$CONFIG_ENV}"
+  mkdir -p "$(dirname "$file")"
+  touch "$file"
+  if grep -qE "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$file"
+  else
+    printf '%s="%s"\n' "$key" "$value" >> "$file"
+  fi
+}

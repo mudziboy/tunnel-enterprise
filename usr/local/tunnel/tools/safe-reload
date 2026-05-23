@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/service-map
+SVC="${1:-}"; [ -n "$SVC" ] || { echo "Usage: safe-reload <service>" >&2; exit 1; }
+UNIT="$(service_unit_name "$SVC")"
+BKP="$(/usr/local/tunnel/tools/rollback-manager backup "$SVC")"
+if ! /usr/local/tunnel/tools/config-validator "$SVC"; then echo "Config invalid. Reload dibatalkan." >&2; exit 1; fi
+if systemctl reload "$UNIT" 2>/dev/null || systemctl restart "$UNIT" 2>/dev/null; then
+  sleep 2
+  STATUS="$(service_status_value "$(echo "$SVC" | tr '[:lower:]' '[:upper:]')" 2>/dev/null || echo ON)"
+  if [ "$STATUS" = OFF ]; then
+    echo "Health gagal setelah reload. Rollback..." >&2
+    /usr/local/tunnel/tools/rollback-manager restore "$SVC" >/dev/null 2>&1 || true
+    systemctl restart "$UNIT" >/dev/null 2>&1 || true
+    exit 1
+  fi
+  echo "Reload $SVC sukses. Backup: $BKP"
+else
+  echo "Reload gagal. Rollback..." >&2
+  /usr/local/tunnel/tools/rollback-manager restore "$SVC" >/dev/null 2>&1 || true
+  systemctl restart "$UNIT" >/dev/null 2>&1 || true
+  exit 1
+fi

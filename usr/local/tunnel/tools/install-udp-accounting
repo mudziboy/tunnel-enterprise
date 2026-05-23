@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[ "$(id -u)" -eq 0 ] || { echo "Run as root" >&2; exit 1; }
+cat >/etc/systemd/system/tunnel-udp-accounting.service <<'UNIT'
+[Unit]
+Description=Tunnel Go UDP/ZiVPN Accounting Collector
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/tunnel/core/udp-accounting-collector --json
+UNIT
+cat >/etc/systemd/system/tunnel-udp-accounting.timer <<'UNIT'
+[Unit]
+Description=Run Tunnel Go UDP/ZiVPN Accounting Collector every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=tunnel-udp-accounting.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+cat >/etc/systemd/system/tunnel-anti-abuse.service <<'UNIT'
+[Unit]
+Description=Tunnel Go Anti-Abuse Policy Runner
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/tunnel/core/anti-abuse-policy --json
+UNIT
+cat >/etc/systemd/system/tunnel-anti-abuse.timer <<'UNIT'
+[Unit]
+Description=Run Tunnel Go Anti-Abuse Policy every minute
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=tunnel-anti-abuse.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+/usr/local/tunnel/core/udp-accounting-rule-sync auto || true
+systemctl daemon-reload
+systemctl enable --now tunnel-udp-accounting.timer tunnel-anti-abuse.timer
+systemctl list-timers tunnel-udp-accounting.timer tunnel-anti-abuse.timer --no-pager

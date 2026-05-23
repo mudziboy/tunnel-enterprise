@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+while true; do
+  ui_sub_header "BACKUP / RESTORE CENTER"
+  echo -e "${ui_red}[1]${ui_white} Create Backup           ${ui_blue}[4]${ui_white} List Backup${ui_reset}"
+  echo -e "${ui_yellow}[2]${ui_white} Restore Backup          ${ui_blue}[5]${ui_white} Back${ui_reset}"
+  echo -e "${ui_green}[3]${ui_white} Enable Auto Backup${ui_reset}"
+  ui_sub_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in 1) /usr/local/tunnel/tools/backup;; 2) /usr/local/tunnel/tools/restore;; 3) /usr/local/tunnel/tools/auto-backup;; 4) ls -lh /etc/tunnel/backups/*.tar.gz 2>/dev/null || true;; 5|x|X) exit 0;; *) echo 'Pilihan tidak valid';; esac
+  ui_wait
+done

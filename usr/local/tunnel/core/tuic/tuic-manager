@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+while true; do
+  clear
+  echo "TUIC Manager"
+  echo "1. Install TUIC"
+  echo "2. Prepare Certificate"
+  echo "3. Render Config"
+  echo "4. Restart TUIC"
+  echo "5. Status TUIC"
+  echo "6. Back"
+  read -rp "Pilih menu: " opt
+  case "$opt" in
+    1) /usr/local/tunnel/core/tuic/install-tuic ;;
+    2) /usr/local/tunnel/core/tuic/prepare-tuic-cert ;;
+    3) /usr/local/tunnel/core/tuic/render-tuic-config ;;
+    4) systemctl restart tuic ;;
+    5) systemctl status tuic --no-pager ;;
+    6) exit 0 ;;
+    *) echo "Pilihan tidak valid" ;;
+  esac
+  read -rp "Enter untuk kembali..." _
+done

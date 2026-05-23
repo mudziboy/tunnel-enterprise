@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/database
+
+require_root
+db_init
+print_ok "Database siap: $TUNNEL_DB"

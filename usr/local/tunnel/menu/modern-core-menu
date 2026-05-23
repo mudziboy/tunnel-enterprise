@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+while true; do
+  ui_sub_header "MODERN CORE MANAGER"
+  echo -e "${ui_red}[1]${ui_white} Sing-box                ${ui_blue}[4]${ui_white} WireGuard${ui_reset}"
+  echo -e "${ui_yellow}[2]${ui_white} Hysteria2               ${ui_blue}[5]${ui_white} Back${ui_reset}"
+  echo -e "${ui_green}[3]${ui_white} TUIC${ui_reset}"
+  ui_sub_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in 1) /usr/local/tunnel/core/sing-box/sing-box-manager;; 2) /usr/local/tunnel/core/hysteria2/hysteria2-manager;; 3) /usr/local/tunnel/core/tuic/tuic-manager;; 4) /usr/local/tunnel/core/wireguard/wireguard-manager;; 5|x|X) exit 0;; *) echo 'Pilihan tidak valid';; esac
+  ui_wait
+done

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/dependencies
+. /usr/local/tunnel/lib/database
+require_root
+load_tunnel_config
+db_init
+install_packages curl openssl
+mkdir -p /etc/tunnel/runtime
+log="/etc/tunnel/runtime/hysteria2-install.log"
+if ! command -v hysteria >/dev/null 2>&1; then
+  ok=0
+  for i in 1 2 3; do echo "Attempt $i install Hysteria2..." | tee -a "$log"; if bash <(curl -fsSL --retry 3 --retry-delay 3 https://get.hy2.sh/) 2>&1 | tee -a "$log"; then ok=1; break; fi; sleep 3; done
+  [ "$ok" -eq 1 ] || { print_err "Hysteria2 gagal diunduh dari upstream. Biasanya masalah network/CDN."; echo "Log: $log"; exit 1; }
+fi
+mkdir -p /etc/hysteria /etc/tunnel/runtime/hysteria2
+/usr/local/tunnel/core/hysteria2/prepare-hysteria2-cert
+/usr/local/tunnel/core/hysteria2/render-hysteria2-config
+systemctl daemon-reload
+if systemctl list-unit-files hysteria-server.service >/dev/null 2>&1; then svc=hysteria-server.service; else svc=hysteria2.service; fi
+systemctl enable "$svc" >/dev/null 2>&1 || true
+systemctl restart "$svc" >/dev/null 2>&1 || true
+systemctl is-active --quiet "$svc" && print_ok "Hysteria2 aktif sebagai $svc" || { print_err "Hysteria2 belum aktif. Cek: systemctl status $svc --no-pager"; exit 1; }

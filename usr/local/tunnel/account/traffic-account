@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/account
+
+account_init
+protocol="$(account_select_protocol)" || { print_err "Protocol tidak valid"; exit 1; }
+read -rp "Username: " username
+require_valid_username "$username"
+
+sqlite3 -header -column "$TUNNEL_DB" "SELECT username, protocol, uplink_bytes, downlink_bytes, collected_at FROM traffic_logs WHERE username='$(db_escape "$username")' AND protocol='$(db_escape "$protocol")' ORDER BY id DESC LIMIT 30;"

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+PACKAGES="/etc/tunnel/packages.json"
+DB="/etc/tunnel/tunnel.db"
+cmd="${1:-list}"
+case "$cmd" in
+  list)
+    jq -r '.packages[] | select(.active != false) | [.id,.name,(.protocols|join(",")),.duration_days,.quota_gb,.ip_limit] | @tsv' "$PACKAGES"
+    ;;
+  json)
+    cat "$PACKAGES"
+    ;;
+  get)
+    id="${2:-}"
+    jq -r --arg id "$id" '.packages[] | select(.id==$id)' "$PACKAGES"
+    ;;
+  sync-db)
+    sqlite3 "$DB" <<'SQL'
+CREATE TABLE IF NOT EXISTS packages (id TEXT PRIMARY KEY,name TEXT NOT NULL,protocols TEXT NOT NULL,duration_days INTEGER DEFAULT 30,quota_gb INTEGER DEFAULT 0,ip_limit INTEGER DEFAULT 1,device_limit INTEGER DEFAULT 1,price INTEGER DEFAULT 0,active INTEGER DEFAULT 1,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+SQL
+    jq -c '.packages[]' "$PACKAGES" | while read -r row; do
+      id=$(jq -r '.id' <<<"$row")
+      name=$(jq -r '.name' <<<"$row" | sed "s/'/''/g")
+      protocols=$(jq -c '.protocols' <<<"$row" | sed "s/'/''/g")
+      days=$(jq -r '.duration_days // 30' <<<"$row")
+      quota=$(jq -r '.quota_gb // 0' <<<"$row")
+      ip=$(jq -r '.ip_limit // 1' <<<"$row")
+      dev=$(jq -r '.device_limit // .ip_limit // 1' <<<"$row")
+      price=$(jq -r '.price // 0' <<<"$row")
+      active=$(jq -r 'if .active == false then 0 else 1 end' <<<"$row")
+      sqlite3 "$DB" "INSERT OR REPLACE INTO packages(id,name,protocols,duration_days,quota_gb,ip_limit,device_limit,price,active,updated_at) VALUES('$id','$name','$protocols',$days,$quota,$ip,$dev,$price,$active,CURRENT_TIMESTAMP);"
+    done
+    echo "packages synced"
+    ;;
+  *)
+    echo "Usage: package-manager {list|json|get <id>|sync-db}" >&2
+    exit 1
+    ;;
+esac

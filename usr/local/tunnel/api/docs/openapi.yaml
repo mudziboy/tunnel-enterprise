@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: Tunnel Go Node Agent API
+  version: 5.5.0
+paths:
+  /health:
+    get:
+      summary: Health check
+  /api/protocols:
+    get:
+      summary: List supported protocols and engines
+  /api/packages:
+    get:
+      summary: List package catalog from the node
+  /api/accounts:
+    post:
+      summary: Create multi-protocol account
+      description: Supports ssh, vmess_ws, vless_ws, trojan_ws, shadowsocks, zivpn, hysteria2, tuic, wireguard, and sing-box protocol variants.
+  /api/accounts/from-package:
+    post:
+      summary: Create account from package id
+  /api/accounts/{username}/message:
+    get:
+      summary: Return formatted account messages for Telegram bot/web panel
+  /api/node/capacity:
+    get:
+      summary: Return capacity score for multi-server placement

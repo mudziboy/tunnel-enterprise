@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+username="${1:-}"
+days="${2:-}"
+expired="${3:-}"
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+
+[ -n "$username" ] || read -rp "Username ZiVPN: " username
+require_valid_username "$username"
+[ -n "$days" ] || read -rp "Tambah hari: " days
+is_valid_days "$days" || { print_err "Hari tidak valid"; exit 1; }
+
+if ! db_account_exists "$username" "zivpn"; then
+  print_err "User tidak ditemukan"
+  exit 1
+fi
+
+current="$(sqlite3 "$TUNNEL_DB" "SELECT expired_at FROM accounts WHERE username='$(db_escape "$username")' AND protocol='zivpn';")"
+today="$(date -u '+%Y-%m-%d')"
+base="$current"
+if [[ "$base" < "$today" ]]; then base="$today"; fi
+[ -n "$expired" ] || expired="$(date -u -d "$base +$days days" '+%Y-%m-%d')"
+
+db_update_account_expiry "$username" "zivpn" "$expired"
+account_id="$(db_account_id "$username" "zivpn")"
+db_log_event "$account_id" "$username" "zivpn" "renew" "days=$days expired=$expired"
+/usr/local/tunnel/core/zivpn/render-zivpn-config
+
+echo "ZiVPN user diperpanjang: $username exp=$expired"

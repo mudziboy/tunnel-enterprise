@@ -1,0 +1,16 @@
+{
+  "node_id": "auto",
+  "name": "Tunnel Go Node",
+  "region": "auto",
+  "provider": "auto",
+  "public_ip": "auto",
+  "domain": "",
+  "api_url": "",
+  "timezone": "Asia/Jakarta",
+  "max_accounts": 500,
+  "max_sessions": 1000,
+  "sell_enabled": true,
+  "maintenance_mode": false,
+  "drain_mode": false,
+  "enabled": true
+}

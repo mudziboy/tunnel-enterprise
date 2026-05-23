@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+SERVICE="${1:-all}"
+fail=0
+check(){ echo "[CHECK] $1"; shift; if "$@"; then echo "  OK"; else echo "  FAIL"; fail=1; fi; }
+validate_one(){
+  case "$1" in
+    nginx) command -v nginx >/dev/null 2>&1 && check nginx nginx -t || true ;;
+    haproxy) command -v haproxy >/dev/null 2>&1 && [ -f /etc/haproxy/haproxy.cfg ] && check haproxy haproxy -c -f /etc/haproxy/haproxy.cfg || true ;;
+    xray) command -v xray >/dev/null 2>&1 && [ -f /etc/xray/config.json ] && check xray xray run -test -config /etc/xray/config.json || true ;;
+    sing-box|singbox) command -v sing-box >/dev/null 2>&1 && [ -f /etc/sing-box/config.json ] && check sing-box sing-box check -c /etc/sing-box/config.json || true ;;
+    wireguard) command -v wg >/dev/null 2>&1 && check wireguard wg show || true ;;
+    ssh) command -v sshd >/dev/null 2>&1 && check sshd sshd -t || true ;;
+    all) for s in ssh nginx haproxy xray sing-box wireguard; do validate_one "$s"; done ;;
+    *) echo "Validator belum tersedia untuk $1" ;;
+  esac
+}
+validate_one "$SERVICE"
+exit "$fail"

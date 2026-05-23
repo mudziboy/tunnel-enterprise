@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+TUNNEL_ACCOUNTING_LOG="${TUNNEL_ACCOUNTING_LOG:-/usr/local/tunnel/logs/accounting.log}"
+mkdir -p "$(dirname "$TUNNEL_ACCOUNTING_LOG")"
+log(){ printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$TUNNEL_ACCOUNTING_LOG"; }
+backend="${1:-auto}"
+[ "$backend" = "auto" ] && backend="$(/usr/local/tunnel/core/accounting-backend-detect)"
+db_init >/dev/null 2>&1
+case "$backend" in
+  nft) /usr/local/tunnel/core/nft-accounting apply ;;
+  iptables) /usr/local/tunnel/core/iptables-accounting apply ;;
+  none) log "no_accounting_backend_available"; exit 0 ;;
+  *) echo "Usage: accounting-rule-sync [auto|nft|iptables]" >&2; exit 2 ;;
+esac
+sqlite3 "$TUNNEL_DB" "INSERT INTO accounting_events(event,backend,payload) VALUES('rules.synced','$backend','{}');" 2>/dev/null || true
+log "rules_synced backend=$backend"

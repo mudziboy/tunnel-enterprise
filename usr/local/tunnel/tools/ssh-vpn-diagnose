@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+ui_sub_header "SSH / VPN DIAGNOSTIC"
+echo -e "${ui_gold}SSH CONFIG${ui_reset}"
+grep -E "PasswordAuthentication|PermitRootLogin|UsePAM|PubkeyAuthentication|KbdInteractiveAuthentication" /etc/ssh/sshd_config 2>/dev/null || true
+echo
+echo -e "${ui_gold}ROOT ACCOUNT${ui_reset}"
+passwd -S root 2>/dev/null || true
+getent passwd root || true
+echo
+echo -e "${ui_gold}LISTEN PORTS${ui_reset}"
+ss -tulpen 2>/dev/null | grep -E ':(22|109|143|80|443|8080|1010|1194|10001|10002|10003|10004|10005|10006|10007|10008)' || true
+echo
+echo -e "${ui_gold}SYSTEMD STATUS${ui_reset}"
+for s in ssh sshd dropbear tunnel-ws-proxy nginx haproxy xray vmess@config vless@config trojan@config shadowsocks@config zivpn sing-box hysteria-server tuic wg-quick@wg0; do
+  if systemctl status "$s" >/dev/null 2>&1; then printf '%-24s ' "$s"; systemctl is-active "$s" 2>/dev/null || true; fi
+done
+echo
+echo -e "${ui_gold}WEBSOCKET BACKEND TEST${ui_reset}"
+if ss -lntp 2>/dev/null | grep -q ':1010 '; then ui_success "WS proxy listen di 127.0.0.1:1010"; else ui_warn "WS proxy belum listen di 1010"; fi
+if ss -lntp 2>/dev/null | grep -q ':109 '; then ui_success "Dropbear listen di 109"; else ui_warn "Dropbear port 109 belum listen"; fi
+if ss -lntp 2>/dev/null | grep -q ':22 '; then ui_success "OpenSSH listen di 22"; else ui_warn "OpenSSH port 22 belum listen"; fi
+echo
+echo -e "${ui_gold}RECENT SSH LOG${ui_reset}"
+journalctl -u ssh -n 40 --no-pager 2>/dev/null || journalctl -u sshd -n 40 --no-pager 2>/dev/null || true

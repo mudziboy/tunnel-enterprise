@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+username="${1:-}"
+days="${2:-}"
+expired="${3:-}"
+
+[ -n "$username" ] || read -rp "Username: " username
+[ -n "$days" ] || read -rp "Tambah hari: " days
+[ -n "$expired" ] || expired="$(date -d "+$days days" '+%Y-%m-%d')"
+
+chage -E "$expired" "$username"
+mkdir -p /etc/tunnel/users/ssh
+printf '%s\n' "$expired" > "/etc/tunnel/users/ssh/$username.expired"
+echo "SSH user diperpanjang: $username exp=$expired"

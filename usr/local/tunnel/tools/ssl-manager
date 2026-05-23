@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+
+require_root
+load_tunnel_config
+
+while true; do
+  clear
+  domain="$(get_domain || true)"
+  echo "SSL Manager"
+  echo "==========="
+  echo "Domain: ${domain:-belum diset}"
+  echo "1. Prepare HAProxy Certificate"
+  echo "2. Show Certificate Dates"
+  echo "3. Install acme.sh"
+  echo "4. Issue Let's Encrypt Certificate"
+  echo "5. Back"
+  read -rp "Pilih menu: " opt
+
+  case "$opt" in
+    1)
+      /usr/local/tunnel/proxy/haproxy/prepare-haproxy-cert
+      ;;
+    2)
+      if [ -f /etc/tunnel/runtime/haproxy.pem ]; then
+        openssl x509 -in /etc/tunnel/runtime/haproxy.pem -noout -subject -issuer -dates
+      else
+        print_err "Certificate belum ada"
+      fi
+      ;;
+    3)
+      curl https://get.acme.sh | sh
+      ;;
+    4)
+      if [ -z "$domain" ]; then
+        print_err "Domain belum diset"
+      else
+        systemctl stop haproxy nginx 2>/dev/null || true
+        ~/.acme.sh/acme.sh --issue --standalone -d "$domain" --force
+        ~/.acme.sh/acme.sh --install-cert -d "$domain" \
+          --fullchain-file /etc/tunnel/runtime/fullchain.cer \
+          --key-file /etc/tunnel/runtime/domain.key \
+          --reloadcmd "cat /etc/tunnel/runtime/fullchain.cer /etc/tunnel/runtime/domain.key > /etc/tunnel/runtime/haproxy.pem && chmod 600 /etc/tunnel/runtime/haproxy.pem && systemctl restart haproxy"
+        cat /etc/tunnel/runtime/fullchain.cer /etc/tunnel/runtime/domain.key > /etc/tunnel/runtime/haproxy.pem
+        chmod 600 /etc/tunnel/runtime/haproxy.pem
+        systemctl restart haproxy 2>/dev/null || true
+      fi
+      ;;
+    5)
+      exit 0
+      ;;
+    *)
+      print_err "Pilihan tidak valid"
+      ;;
+  esac
+  read -rp "Enter untuk kembali..." _
+done

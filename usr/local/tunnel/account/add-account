@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/account
+require_root
+account_init
+
+protocol="${1:-${TUNNEL_PROTOCOL:-}}"
+protocol="$(echo "$protocol" | tr '[:upper:]' '[:lower:]')"
+if [ -z "$protocol" ]; then
+  protocol="$(account_select_protocol)" || { print_err "Protocol tidak valid"; exit 1; }
+fi
+is_valid_protocol "$protocol" || { print_err "Protocol tidak valid: $protocol"; exit 1; }
+
+read -rp "Username: " username
+require_valid_username "$username"
+if db_account_exists "$username" "$protocol"; then print_err "Akun sudah ada: $username/$protocol"; exit 1; fi
+read -rp "Masa aktif hari: " days
+is_valid_days "$days" || { print_err "Hari tidak valid"; exit 1; }
+read -rp "Quota GB, 0 unlimited: " quota; quota="${quota:-0}"
+is_valid_quota_gb "$quota" || { print_err "Quota tidak valid"; exit 1; }
+read -rp "IP limit, 0 unlimited: " iplimit; iplimit="${iplimit:-0}"
+is_valid_ip_limit "$iplimit" || { print_err "IP limit tidak valid"; exit 1; }
+transport=""
+case "$protocol" in
+  vmess|vless|trojan|shadowsocks)
+    echo "Transport:"
+    echo "1. ws"
+    echo "2. grpc"
+    echo "3. reality"
+    read -rp "Pilih transport [1]: " t
+    case "${t:-1}" in 1) transport="ws";; 2) transport="grpc";; 3) transport="reality";; *) transport="ws";; esac
+    ;;
+  ssh) transport="tcp" ;;
+esac
+secret="$(account_random_secret)"; expired="$(account_expiry_date "$days")"; password="$secret"; uuid="$secret"
+if account_dispatcher_exists add "$protocol"; then
+  account_dispatch add "$protocol" "$username" "$days" "$quota" "$iplimit" "$transport" "$secret" || print_warn "Dispatcher $protocol gagal. Data tetap disimpan ke database."
+else
+  print_warn "Dispatcher protocol belum aktif. Data hanya disimpan ke database."
+fi
+if ! db_account_exists "$username" "$protocol"; then
+  db_add_account "$username" "$protocol" "$transport" "$uuid" "$password" "$quota" "$iplimit" "$expired" "active" "" "local"
+fi
+account_id="$(db_account_id "$username" "$protocol")"
+db_log_event "$account_id" "$username" "$protocol" "add" "days=$days quota_gb=$quota ip_limit=$iplimit transport=$transport"
+audit_log "local" "add-account" "$username/$protocol" "days=$days quota_gb=$quota ip_limit=$iplimit"
+print_ok "Akun dibuat"
+echo "Username : $username"
+echo "Protocol : $protocol"
+echo "Transport: ${transport:-default}"
+echo "Expired  : $expired"
+echo "Quota GB : $quota"
+echo "IP Limit : $iplimit"

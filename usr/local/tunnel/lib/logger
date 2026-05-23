@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+TUNNEL_LOG_DIR="${TUNNEL_LOG_DIR:-/usr/local/tunnel/logs}"
+AUDIT_LOG="${AUDIT_LOG:-$TUNNEL_LOG_DIR/audit.log}"
+SYSTEM_LOG="${SYSTEM_LOG:-$TUNNEL_LOG_DIR/system.log}"
+ERROR_LOG="${ERROR_LOG:-$TUNNEL_LOG_DIR/error.log}"
+
+mkdir -p "$TUNNEL_LOG_DIR"
+
+log_time() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
+audit_log() {
+  printf '%s actor=%s action=%s target=%s detail=%s\n' "$(log_time)" "${1:-system}" "${2:-unknown}" "${3:--}" "${4:--}" >> "$AUDIT_LOG"
+}
+
+system_log() {
+  printf '%s %s\n' "$(log_time)" "$*" >> "$SYSTEM_LOG"
+}
+
+error_log() {
+  printf '%s %s\n' "$(log_time)" "$*" >> "$ERROR_LOG"
+}

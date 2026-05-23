@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+db_init >/dev/null 2>&1
+panel="$(grep -E '^PANEL_URL=' /etc/tunnel/panel.env 2>/dev/null | cut -d= -f2- | tr -d '"')"
+secret="$(cat /etc/tunnel/node.secret 2>/dev/null || true)"
+[ -n "$panel" ] || { echo "Panel URL belum diset."; exit 0; }
+command -v curl >/dev/null 2>&1 || { echo "curl tidak tersedia."; exit 0; }
+sqlite3 -separator $'\t' "$TUNNEL_DB" "SELECT id,event,payload FROM outbox WHERE status='PENDING' ORDER BY id LIMIT 50;" 2>/dev/null | while IFS=$'\t' read -r id event payload; do
+  [ -n "$id" ] || continue
+  if curl -fsS -m 10 -H "x-node-secret: $secret" -H 'content-type: application/json' -d "{\"event\":\"$event\",\"payload\":$payload}" "$panel/api/node-events" >/dev/null 2>&1; then
+    sqlite3 "$TUNNEL_DB" "UPDATE outbox SET status='SENT', updated_at=CURRENT_TIMESTAMP WHERE id=$id; UPDATE events SET synced=1 WHERE id=(SELECT event_id FROM outbox WHERE id=$id);" 2>/dev/null || true
+  else
+    sqlite3 "$TUNNEL_DB" "UPDATE outbox SET attempts=attempts+1,last_error='sync failed',updated_at=CURRENT_TIMESTAMP WHERE id=$id;" 2>/dev/null || true
+  fi
+done

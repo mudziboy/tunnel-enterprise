@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+db_init >/dev/null 2>&1
+run_job(){
+  local id="$1" type payload
+  type="$(sqlite3 "$TUNNEL_DB" "SELECT type FROM jobs WHERE job_id='$id';")"
+  payload="$(sqlite3 "$TUNNEL_DB" "SELECT payload FROM jobs WHERE job_id='$id';")"
+  sqlite3 "$TUNNEL_DB" "UPDATE jobs SET status='RUNNING', started_at=CURRENT_TIMESTAMP WHERE job_id='$id';"
+  case "$type" in
+    reload_service) svc="$(printf '%s' "$payload" | jq -r '.service // empty' 2>/dev/null)"; /usr/local/tunnel/tools/safe-reload "$svc" && res=SUCCESS || res=FAILED ;;
+    service_doctor) /usr/local/tunnel/tools/service-doctor >/dev/null && res=SUCCESS || res=FAILED ;;
+    heartbeat) /usr/local/tunnel/node/node-heartbeat >/dev/null && res=SUCCESS || res=FAILED ;;
+    *) res=FAILED ;;
+  esac
+  sqlite3 "$TUNNEL_DB" "UPDATE jobs SET status='$res', finished_at=CURRENT_TIMESTAMP, result='$type finished' WHERE job_id='$id';"
+}
+case "${1:-run-pending}" in
+  add) type="${2:?type}"; payload="${3:-{}}"; id="job_$(date +%Y%m%d%H%M%S)_$RANDOM"; sqlite3 "$TUNNEL_DB" "INSERT INTO jobs(job_id,type,payload) VALUES('$id','$type','$(db_escape "$payload")');"; echo "$id";;
+  run) run_job "${2:?job_id}";;
+  run-pending) sqlite3 -noheader "$TUNNEL_DB" "SELECT job_id FROM jobs WHERE status='PENDING' ORDER BY id LIMIT 5;" | while read -r id; do [ -n "$id" ] && run_job "$id"; done;;
+  list) sqlite3 -header -column "$TUNNEL_DB" "SELECT job_id,type,status,created_at,finished_at FROM jobs ORDER BY id DESC LIMIT 50;";;
+  *) echo "Usage: job-runner add <type> <json>|run <job_id>|run-pending|list"; exit 1;;
+esac

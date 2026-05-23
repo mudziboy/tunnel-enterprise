@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+username="${1:-}"
+days="${2:-}"
+quota="${3:-0}"
+iplimit="${4:-1}"
+secret="${6:-}"
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+
+[ -n "$username" ] || read -rp "Username/password ZiVPN: " username
+require_valid_username "$username"
+[ -n "$days" ] || read -rp "Masa aktif hari: " days
+is_valid_days "$days" || { print_err "Hari tidak valid"; exit 1; }
+[ -n "$secret" ] || secret="$username"
+
+if ! db_account_exists "$username" "zivpn"; then
+  expired="$(account_expiry_date "$days")"
+  db_add_account "$username" "zivpn" "udp" "" "$secret" "$quota" "$iplimit" "$expired" "active" "" "local"
+  account_id="$(db_account_id "$username" "zivpn")"
+  db_log_event "$account_id" "$username" "zivpn" "add" "days=$days ip_limit=$iplimit"
+fi
+
+mkdir -p /etc/tunnel/users/zivpn
+printf '%s\n' "$iplimit" > "/etc/tunnel/users/zivpn/$username.iplimit"
+/usr/local/tunnel/core/zivpn/render-zivpn-config
+
+echo "ZiVPN user siap"
+echo "Username : $username"
+echo "Password : $secret"
+echo "Expired  : $(sqlite3 "$TUNNEL_DB" "SELECT expired_at FROM accounts WHERE username='$(db_escape "$username")' AND protocol='zivpn';")"
+echo "Port     : ${ZIVPN_PORT:-5667}"
+echo "UDP Range: ${ZIVPN_UDP_RANGE_START:-6000}-${ZIVPN_UDP_RANGE_END:-19999}"

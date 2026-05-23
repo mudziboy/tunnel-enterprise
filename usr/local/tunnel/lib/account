@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/validation
+. /usr/local/tunnel/lib/database
+. /usr/local/tunnel/lib/logger
+load_tunnel_config
+
+account_supported_protocols(){ printf '%s\n' ssh openvpn vmess vless trojan shadowsocks zivpn hysteria2 tuic wireguard sing-box; }
+account_xray_protocols(){ printf '%s\n' vmess vless trojan shadowsocks; }
+account_valid_xray_protocol(){ case "${1:-}" in vmess|vless|trojan|shadowsocks) return 0;; *) return 1;; esac; }
+account_select_protocol(){
+  local opt p i=1 protocols
+  mapfile -t protocols < <(account_supported_protocols)
+  echo "Pilih protocol:"
+  for p in "${protocols[@]}"; do echo "$i. $p"; i=$((i+1)); done
+  read -rp "Protocol: " opt
+  if [[ "$opt" =~ ^[0-9]+$ ]] && [ "$opt" -ge 1 ] && [ "$opt" -le "${#protocols[@]}" ]; then printf '%s\n' "${protocols[$((opt-1))]}"; return 0; fi
+  opt="$(echo "$opt" | tr '[:upper:]' '[:lower:]')"
+  if is_valid_protocol "$opt"; then printf '%s\n' "$opt"; return 0; fi
+  return 1
+}
+account_select_xray_protocol(){
+  local opt protocols p i=1
+  mapfile -t protocols < <(account_xray_protocols)
+  echo "Pilih protocol Xray:"
+  for p in "${protocols[@]}"; do echo "$i. $p"; i=$((i+1)); done
+  read -rp "Protocol: " opt
+  if [[ "$opt" =~ ^[0-9]+$ ]] && [ "$opt" -ge 1 ] && [ "$opt" -le "${#protocols[@]}" ]; then printf '%s\n' "${protocols[$((opt-1))]}"; return 0; fi
+  opt="$(echo "$opt" | tr '[:upper:]' '[:lower:]')"
+  if account_valid_xray_protocol "$opt"; then printf '%s\n' "$opt"; return 0; fi
+  return 1
+}
+account_expiry_date(){ date -u -d "+$1 days" '+%Y-%m-%d'; }
+account_random_secret(){ command -v uuidgen >/dev/null 2>&1 && uuidgen || cat /proc/sys/kernel/random/uuid; }
+account_dispatcher_exists(){ local action="$1" protocol="$2" path="/usr/local/tunnel/core/$protocol/$action-$protocol"; [ -x "$path" ]; }
+account_dispatch(){ local action="$1" protocol="$2"; shift 2; local path="/usr/local/tunnel/core/$protocol/$action-$protocol"; [ -x "$path" ] && "$path" "$@" || return 66; }
+account_init(){ db_init; }

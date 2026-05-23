@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+cmd="${1:-status}"
+shift || true
+case "$cmd" in
+  install) /usr/local/tunnel/tools/install-accounting "$@" ;;
+  sync) /usr/local/tunnel/core/accounting-rule-sync "${1:-auto}" ;;
+  collect) /usr/local/tunnel/core/accounting-collector "${1:-table}" ;;
+  table|status) /usr/local/tunnel/core/accounting-collector table ;;
+  json) /usr/local/tunnel/core/accounting-collector --json ;;
+  reset) /usr/local/tunnel/core/accounting-reset "${1:-soft}" ;;
+  nft-list) /usr/local/tunnel/core/nft-accounting list ;;
+  iptables-list) /usr/local/tunnel/core/iptables-accounting list ;;
+  backend) /usr/local/tunnel/core/accounting-backend-detect ;;
+  *) cat <<'EOF'
+Usage: tunnel-accounting <command>
+
+Commands:
+  install          install systemd timers
+  sync [backend]   sync nftables/iptables rules
+  collect          collect counters now
+  table            show last snapshots
+  json             output snapshots as JSON
+  reset soft|full  reset database baselines or all rules
+  nft-list         list nftables rules
+  iptables-list    list iptables rules
+  backend          show selected backend
+EOF
+     exit 2 ;;
+esac

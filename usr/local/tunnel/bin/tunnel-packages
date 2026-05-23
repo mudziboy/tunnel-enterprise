@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec /usr/local/tunnel/core/package-manager "$@"

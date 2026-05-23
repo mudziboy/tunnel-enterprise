@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+echo "Online SSH users"
+echo "================"
+who 2>/dev/null || true
+echo ""
+echo "SSH processes"
+echo "============="
+ps -eo user,pid,comm,args | grep -E 'sshd|dropbear' | grep -v grep || true

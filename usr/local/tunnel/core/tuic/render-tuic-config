@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/database
+
+require_root
+load_tunnel_config
+db_init
+
+mkdir -p /etc/tuic /etc/tunnel/runtime/tuic
+
+python3 /usr/local/tunnel/core/tuic/render-tuic-json.py \
+  --db "$TUNNEL_DB" \
+  --port "${TUIC_PORT:-4433}" \
+  --output /etc/tunnel/runtime/tuic/config.json
+
+jq empty /etc/tunnel/runtime/tuic/config.json
+if [ -f /etc/tuic/config.json ]; then
+  cp -a /etc/tuic/config.json "/etc/tunnel/runtime/tuic/config.json.$(date +%Y%m%d-%H%M%S).bak"
+fi
+
+install -m 0644 /etc/tunnel/runtime/tuic/config.json /etc/tuic/config.json
+
+if systemctl list-unit-files tuic.service >/dev/null 2>&1; then
+  systemctl restart tuic || true
+fi
+
+print_ok "Config TUIC diterapkan"

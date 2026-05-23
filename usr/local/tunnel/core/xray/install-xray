@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/dependencies
+require_root
+install_packages curl unzip ca-certificates
+if command -v xray >/dev/null 2>&1; then xray version | head -n1 || true; print_ok "Xray sudah terinstall"; exit 0; fi
+ok=0
+for i in 1 2 3; do
+  echo "Install Xray attempt $i..."
+  if bash -c "$(curl -fsSL --retry 3 --retry-delay 3 https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install; then ok=1; break; fi
+  sleep 3
+done
+[ "$ok" -eq 1 ] || { print_err "Gagal install Xray dari upstream"; exit 1; }
+if [ ! -x /usr/local/bin/xray ] && command -v xray >/dev/null 2>&1; then ln -sf "$(command -v xray)" /usr/local/bin/xray; fi
+command -v xray >/dev/null 2>&1 || { print_err "Xray binary tidak ditemukan setelah install"; exit 1; }
+xray version | head -n1 || true
+print_ok "Xray berhasil diinstall"

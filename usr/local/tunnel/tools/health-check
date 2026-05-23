@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+services=(SSH DROPBEAR NGINX HAPROXY WS-PROXY API XRAY ZIVPN SINGBOX HYSTERIA2 TUIC WIREGUARD)
+unit_for(){
+  case "$1" in
+    SSH) echo ssh ;;
+    DROPBEAR) echo dropbear ;;
+    NGINX) echo nginx ;;
+    HAPROXY) echo haproxy ;;
+    WS-PROXY) echo ws-proxy ;;
+    API) echo tunnel-api ;;
+    XRAY) echo xray ;;
+    ZIVPN) echo zivpn ;;
+    SINGBOX) echo sing-box ;;
+    HYSTERIA2) echo hysteria2 ;;
+    TUIC) echo tuic ;;
+    WIREGUARD) echo wg-quick@wg0 ;;
+  esac
+}
+status_for(){
+  local s="$1" unit bin port
+  unit="$(unit_for "$s")"
+  if systemctl list-unit-files "$unit.service" >/dev/null 2>&1 || systemctl status "$unit" >/dev/null 2>&1; then
+    systemctl is-active --quiet "$unit" && { echo ON; return; }
+  fi
+  case "$s" in
+    SSH) ss -ltn 2>/dev/null | grep -Eq ':(22|109)\b' && echo ON || echo OFF ;;
+    DROPBEAR) pgrep -x dropbear >/dev/null 2>&1 && echo ON || echo OFF ;;
+    NGINX) pgrep -x nginx >/dev/null 2>&1 && echo ON || echo OFF ;;
+    HAPROXY) pgrep -x haproxy >/dev/null 2>&1 && echo ON || echo OFF ;;
+    WS-PROXY) pgrep -f 'ws-proxy|websocket' >/dev/null 2>&1 && echo ON || echo OFF ;;
+    API) pgrep -f 'api-server.js|Tunnel Go Node Agent' >/dev/null 2>&1 && echo ON || echo OFF ;;
+    XRAY) pgrep -x xray >/dev/null 2>&1 && echo ON || echo OFF ;;
+    ZIVPN) pgrep -f zivpn >/dev/null 2>&1 && echo ON || echo OFF ;;
+    SINGBOX) pgrep -x sing-box >/dev/null 2>&1 && echo ON || echo OFF ;;
+    HYSTERIA2) pgrep -f hysteria >/dev/null 2>&1 && echo ON || echo OFF ;;
+    TUIC) pgrep -f tuic >/dev/null 2>&1 && echo ON || echo OFF ;;
+    WIREGUARD) command -v wg >/dev/null 2>&1 && wg show 2>/dev/null | grep -q interface && echo ON || echo OFF ;;
+  esac
+}
+if [ "${1:-}" = "--json" ]; then
+  printf '['; first=1
+  for s in "${services[@]}"; do st="$(status_for "$s")"; [ $first -eq 0 ] && printf ','; first=0; printf '{"service":"%s","status":"%s"}' "$s" "$st"; done
+  printf ']\n'
+else
+  printf '%-14s %s\n' SERVICE STATUS
+  for s in "${services[@]}"; do printf '%-14s %s\n' "$s" "$(status_for "$s")"; done
+fi

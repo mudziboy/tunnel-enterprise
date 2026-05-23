@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+while true; do
+  ui_sub_header "SSH / OPENVPN MANAGER"
+  echo -e "${ui_cyan}[1]${ui_white} INSTALL / REPAIR SSH        ${ui_cyan}[7]${ui_white} LIST SSH${ui_reset}"
+  echo -e "${ui_cyan}[2]${ui_white} ADD SSH ACCOUNT             ${ui_cyan}[8]${ui_white} LIMIT SSH${ui_reset}"
+  echo -e "${ui_cyan}[3]${ui_white} DELETE SSH ACCOUNT          ${ui_cyan}[9]${ui_white} SSH/VPN DIAGNOSE${ui_reset}"
+  echo -e "${ui_cyan}[4]${ui_white} RENEW SSH ACCOUNT           ${ui_cyan}[10]${ui_white} REPAIR ROOT LOGIN${ui_reset}"
+  echo -e "${ui_cyan}[5]${ui_white} TRIAL SSH ACCOUNT           ${ui_cyan}[11]${ui_white} INSTALL OPENVPN${ui_reset}"
+  echo -e "${ui_cyan}[6]${ui_white} CHECK SSH ACCOUNT           ${ui_red}[X]${ui_white} BACK${ui_reset}"
+  ui_sub_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in
+    1) /usr/local/tunnel/core/ssh/install-ssh; ui_wait ;;
+    2) /usr/local/tunnel/core/ssh/add-ssh; ui_wait ;;
+    3) /usr/local/tunnel/core/ssh/delete-ssh; ui_wait ;;
+    4) /usr/local/tunnel/core/ssh/renew-ssh; ui_wait ;;
+    5) /usr/local/tunnel/core/ssh/trial-ssh; ui_wait ;;
+    6) /usr/local/tunnel/core/ssh/check-ssh; ui_wait ;;
+    7) /usr/local/tunnel/core/ssh/list-ssh; ui_wait ;;
+    8) /usr/local/tunnel/core/ssh/limit-ssh; ui_wait ;;
+    9) /usr/local/tunnel/tools/ssh-vpn-diagnose; ui_wait ;;
+    10) /usr/local/tunnel/tools/repair-ssh-login; ui_wait ;;
+    11) /usr/local/tunnel/core/openvpn/install-openvpn; ui_wait ;;
+    x|X) exit 0 ;;
+    *) ui_warn "Pilihan tidak valid"; sleep 1 ;;
+  esac
+done

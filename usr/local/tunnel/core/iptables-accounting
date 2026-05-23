@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+TUNNEL_ACCOUNTING_LOG="${TUNNEL_ACCOUNTING_LOG:-/usr/local/tunnel/logs/accounting.log}"
+mkdir -p "$(dirname "$TUNNEL_ACCOUNTING_LOG")"
+log(){ printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$TUNNEL_ACCOUNTING_LOG"; }
+esc(){ db_escape "$1"; }
+ipt(){ iptables "$@"; }
+ensure_base(){
+  command -v iptables >/dev/null 2>&1 || { echo "iptables command not found" >&2; exit 1; }
+  iptables -N TUNNELGO_UID_OUT >/dev/null 2>&1 || true
+  iptables -C OUTPUT -j TUNNELGO_UID_OUT >/dev/null 2>&1 || iptables -I OUTPUT 1 -j TUNNELGO_UID_OUT
+}
+flush_managed(){ iptables -F TUNNELGO_UID_OUT >/dev/null 2>&1 || true; }
+apply_rules(){
+  db_init >/dev/null 2>&1
+  ensure_base
+  flush_managed
+  sqlite3 -separator $'\t' "$TUNNEL_DB" "SELECT username,protocol FROM accounts WHERE status IN ('active','trial') AND protocol IN ('ssh','dropbear') ORDER BY username,protocol;" | while IFS=$'\t' read -r user proto; do
+    [ -n "$user" ] || continue
+    if id "$user" >/dev/null 2>&1; then
+      key="iptables:uid:${user}:${proto}:out"
+      iptables -A TUNNELGO_UID_OUT -m owner --uid-owner "$user" -m comment --comment "tg:${user}:${proto}:out" -j RETURN >/dev/null 2>&1 || true
+      sqlite3 "$TUNNEL_DB" "INSERT OR IGNORE INTO accounting_rules(username,protocol,backend,direction,match_type,match_value,counter_key) VALUES('$(esc "$user")','$(esc "$proto")','iptables','out','uid','$(esc "$user")','$(esc "$key")'); UPDATE accounting_rules SET enabled=1,updated_at=CURRENT_TIMESTAMP WHERE counter_key='$(esc "$key")';" 2>/dev/null || true
+      log "iptables_rule user=$user proto=$proto key=$key"
+    fi
+  done
+}
+list_rules(){ ensure_base; iptables -nvxL TUNNELGO_UID_OUT --line-numbers 2>/dev/null || true; }
+reset_rules(){
+  iptables -D OUTPUT -j TUNNELGO_UID_OUT >/dev/null 2>&1 || true
+  iptables -F TUNNELGO_UID_OUT >/dev/null 2>&1 || true
+  iptables -X TUNNELGO_UID_OUT >/dev/null 2>&1 || true
+  log "iptables_rules_reset"
+}
+case "${1:-list}" in
+  apply) apply_rules ;;
+  list|--list) list_rules ;;
+  reset) reset_rules ;;
+  *) echo "Usage: iptables-accounting {apply|list|reset}" >&2; exit 2 ;;
+esac

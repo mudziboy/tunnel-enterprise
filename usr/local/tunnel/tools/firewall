@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+
+require_root
+load_tunnel_config
+
+show_rules() {
+  echo "Filter"
+  echo "======"
+  iptables -S 2>/dev/null || true
+  echo ""
+  echo "NAT"
+  echo "==="
+  iptables -t nat -S 2>/dev/null || true
+}
+
+rebuild_rules() {
+  iface="$(ip -4 route ls | awk '/default/ {for(i=1;i<=NF;i++){if($i=="dev"){print $(i+1); exit}}}' | head -n1)"
+  [ -n "$iface" ] || iface="eth0"
+
+  sysctl -w net.ipv4.ip_forward=1 >/dev/null
+
+  iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -A INPUT -i lo -j ACCEPT
+  iptables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+  for port in "${SSH_PORT:-22}" "${HTTP_PORT:-80}" "${HTTPS_PORT:-443}" "${OPENVPN_TCP_PORT:-1194}" "${TUNNEL_API_PORT:-5889}"; do
+    iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
+  done
+
+  IFS=',' read -ra dp <<< "${DROPBEAR_PORTS:-109,143}"
+  for port in "${dp[@]}"; do
+    iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
+  done
+
+  for port in "${OPENVPN_UDP_PORT:-2200}" "${ZIVPN_PORT:-5667}" "${HYSTERIA2_PORT:-8443}" "${TUIC_PORT:-4433}" "${WIREGUARD_PORT:-51820}"; do
+    iptables -C INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null || iptables -A INPUT -p udp --dport "$port" -j ACCEPT
+  done
+
+  /usr/local/tunnel/core/zivpn/apply-zivpn-firewall 2>/dev/null || true
+
+  iptables -t nat -C POSTROUTING -o "$iface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o "$iface" -j MASQUERADE
+
+  mkdir -p /etc/iptables
+  iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+}
+
+while true; do
+  clear
+  echo "Firewall Manager"
+  echo "1. Show Rules"
+  echo "2. Rebuild VPN Rules"
+  echo "3. Save Rules"
+  echo "4. Back"
+  read -rp "Pilih menu: " opt
+  case "$opt" in
+    1) show_rules ;;
+    2) rebuild_rules; print_ok "Firewall rules dibangun ulang" ;;
+    3) mkdir -p /etc/iptables; iptables-save > /etc/iptables/rules.v4; print_ok "Rules disimpan" ;;
+    4) exit 0 ;;
+    *) echo "Pilihan tidak valid" ;;
+  esac
+  read -rp "Enter untuk kembali..." _
+done

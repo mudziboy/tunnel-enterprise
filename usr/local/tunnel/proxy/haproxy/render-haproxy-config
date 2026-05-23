@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+
+require_root
+load_tunnel_config
+
+cat > /etc/haproxy/haproxy.cfg <<EOF
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    daemon
+    maxconn 50000
+    tune.ssl.default-dh-param 2048
+
+defaults
+    log global
+    mode http
+    option httplog
+    option dontlognull
+    option http-server-close
+    option forwardfor
+    timeout connect 10s
+    timeout client  300s
+    timeout server  300s
+    timeout tunnel  1h
+    retries 3
+
+frontend tunnel_http
+    bind *:${HTTP_PORT:-80}
+    mode http
+    acl acme_challenge path_beg /.well-known/acme-challenge/
+    use_backend nginx_backend if acme_challenge
+    http-request redirect scheme https code 301 unless acme_challenge
+
+frontend tunnel_https
+    bind *:${HTTPS_PORT:-443} ssl crt /etc/tunnel/runtime/haproxy.pem alpn h2,http/1.1
+    mode http
+
+    acl path_vless_ws path_beg /vless
+    acl path_vmess_ws path_beg /vmess
+    acl path_trojan_ws path_beg /trojan-ws
+    acl path_ss_ws path_beg /ss-ws
+
+    acl path_vless_grpc path_beg /vless-grpc
+    acl path_vmess_grpc path_beg /vmess-grpc
+    acl path_trojan_grpc path_beg /trojan-grpc
+    acl path_ss_grpc path_beg /ss-grpc
+
+    acl path_ssh_ws path_beg /sshws
+    acl is_websocket hdr(Upgrade) -i websocket
+
+    use_backend vless_ws_backend if path_vless_ws
+    use_backend vmess_ws_backend if path_vmess_ws
+    use_backend trojan_ws_backend if path_trojan_ws
+    use_backend shadowsocks_ws_backend if path_ss_ws
+
+    use_backend vless_grpc_backend if path_vless_grpc
+    use_backend vmess_grpc_backend if path_vmess_grpc
+    use_backend trojan_grpc_backend if path_trojan_grpc
+    use_backend shadowsocks_grpc_backend if path_ss_grpc
+
+    use_backend ssh_ws_backend if path_ssh_ws is_websocket
+    default_backend nginx_backend
+
+backend nginx_backend
+    mode http
+    server nginx_status 127.0.0.1:8081 check
+
+backend vless_ws_backend
+    mode http
+    server vless_ws 127.0.0.1:${XRAY_VLESS_WS_PORT:-10001} check
+
+backend vmess_ws_backend
+    mode http
+    server vmess_ws 127.0.0.1:${XRAY_VMESS_WS_PORT:-10002} check
+
+backend trojan_ws_backend
+    mode http
+    server trojan_ws 127.0.0.1:${XRAY_TROJAN_WS_PORT:-10003} check
+
+backend shadowsocks_ws_backend
+    mode http
+    server shadowsocks_ws 127.0.0.1:${XRAY_SHADOWSOCKS_WS_PORT:-10004} check
+
+backend vless_grpc_backend
+    mode http
+    server vless_grpc 127.0.0.1:${XRAY_VLESS_GRPC_PORT:-10005} proto h2 check
+
+backend vmess_grpc_backend
+    mode http
+    server vmess_grpc 127.0.0.1:${XRAY_VMESS_GRPC_PORT:-10006} proto h2 check
+
+backend trojan_grpc_backend
+    mode http
+    server trojan_grpc 127.0.0.1:${XRAY_TROJAN_GRPC_PORT:-10007} proto h2 check
+
+backend shadowsocks_grpc_backend
+    mode http
+    server shadowsocks_grpc 127.0.0.1:${XRAY_SHADOWSOCKS_GRPC_PORT:-10008} proto h2 check
+
+backend ssh_ws_backend
+    mode http
+    server ssh_ws 127.0.0.1:1010 check
+EOF
+
+haproxy -c -f /etc/haproxy/haproxy.cfg
+print_ok "HAProxy config berhasil dibuat"

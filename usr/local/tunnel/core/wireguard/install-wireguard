@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/dependencies
+
+require_root
+load_tunnel_config
+install_packages wireguard iptables
+
+mkdir -p /etc/wireguard /etc/tunnel/users/wireguard
+chmod 700 /etc/wireguard
+
+if [ ! -f /etc/wireguard/server_private.key ]; then
+  wg genkey | tee /etc/wireguard/server_private.key | wg pubkey > /etc/wireguard/server_public.key
+  chmod 600 /etc/wireguard/server_private.key
+fi
+
+/usr/local/tunnel/core/wireguard/render-wireguard-config
+
+systemctl enable wg-quick@wg0 >/dev/null 2>&1
+systemctl restart wg-quick@wg0
+
+print_ok "WireGuard siap"

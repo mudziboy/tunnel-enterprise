@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/dependencies
+require_root
+install_base_dependencies
+print_ok 'Dependency dasar selesai dipasang'

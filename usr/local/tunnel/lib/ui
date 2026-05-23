@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ui_reset='\033[0m'; ui_bold='\033[1m'
+ui_red='\033[38;5;196m'; ui_green='\033[38;5;46m'; ui_yellow='\033[38;5;226m'
+ui_blue='\033[38;5;39m'; ui_pink='\033[38;5;201m'; ui_cyan='\033[38;5;51m'
+ui_gold='\033[38;5;220m'; ui_gray='\033[38;5;245m'; ui_dark='\033[38;5;240m'; ui_white='\033[38;5;255m'
+
+[ -f /usr/local/tunnel/lib/service-map ] && . /usr/local/tunnel/lib/service-map || true
+
+ui_cols(){ local c; c="$(tput cols 2>/dev/null || echo 96)"; [ "$c" -gt 96 ] && c=96; [ "$c" -lt 74 ] && c=74; echo "$c"; }
+ui_repeat(){ local char="$1" count="$2"; printf '%*s' "$count" '' | tr ' ' "$char"; }
+ui_line(){ local c; c="$(ui_cols)"; echo -e "${ui_pink}$(ui_repeat '━' "$c")${ui_reset}"; }
+ui_dim_line(){ local c; c="$(ui_cols)"; echo -e "${ui_dark}$(ui_repeat '─' "$c")${ui_reset}"; }
+ui_center(){ local text="$1" color="${2:-$ui_white}" c pad; c="$(ui_cols)"; pad=$(( (c-${#text})/2 )); [ "$pad" -lt 0 ] && pad=0; printf "%b%*s%s%b\n" "$color" "$pad" '' "$text" "$ui_reset"; }
+
+ui_get_ip(){ curl -4s --max-time 3 https://ipv4.icanhazip.com 2>/dev/null | tr -d ' \t\r\n' || echo '-'; }
+ui_get_domain(){ local d; d="$(cat /etc/tunnel/domain 2>/dev/null | tr -d ' \t\r\n' || true)"; [ -n "$d" ] && echo "$d" || echo '-'; }
+ui_get_datacenter(){
+  local cache="/etc/tunnel/runtime/datacenter.cache" now exp ip data org city region country
+  mkdir -p /etc/tunnel/runtime 2>/dev/null || true
+  now="$(date +%s)"; exp=21600
+  if [ -s "$cache" ] && [ $(( now-$(stat -c %Y "$cache" 2>/dev/null || echo 0) )) -lt "$exp" ]; then cat "$cache"; return; fi
+  ip="$(ui_get_ip)"
+  if command -v curl >/dev/null 2>&1 && [ "$ip" != '-' ]; then
+    data="$(curl -fsS --max-time 4 "https://ipinfo.io/${ip}/json" 2>/dev/null || true)"
+    if [ -n "$data" ] && command -v jq >/dev/null 2>&1; then
+      org="$(printf '%s' "$data" | jq -r '.org // empty' | sed 's/^[A-Z][A-Z0-9]* //')"
+      city="$(printf '%s' "$data" | jq -r '.city // empty')"
+      region="$(printf '%s' "$data" | jq -r '.region // empty')"
+      country="$(printf '%s' "$data" | jq -r '.country // empty')"
+      printf '%s%s%s%s%s\n' "${org:-Unknown DC}" "${city:+ • $city}" "${region:+, $region}" "${country:+ ($country)}" "" | tee "$cache"
+      return
+    fi
+  fi
+  echo "Unknown DC" | tee "$cache"
+}
+
+ui_logo(){
+  ui_line
+  ui_center "████████╗██╗   ██╗███╗   ██╗███╗   ██╗███████╗██╗         ██████╗  ██████╗ " "${ui_cyan}${ui_bold}"
+  ui_center "╚══██╔══╝██║   ██║████╗  ██║████╗  ██║██╔════╝██║        ██╔════╝ ██╔═══██╗" "${ui_cyan}${ui_bold}"
+  ui_center "   ██║   ██║   ██║██╔██╗ ██║██╔██╗ ██║█████╗  ██║        ██║  ███╗██║   ██║" "${ui_pink}${ui_bold}"
+  ui_center "   ██║   ██║   ██║██║╚██╗██║██║╚██╗██║██╔══╝  ██║        ██║   ██║██║   ██║" "${ui_pink}${ui_bold}"
+  ui_center "   ██║   ╚██████╔╝██║ ╚████║██║ ╚████║███████╗███████╗   ╚██████╔╝╚██████╔╝" "${ui_cyan}${ui_bold}"
+  ui_center "PREMIUM CYBER ENTERPRISE VPN • NEON CONTROL PANEL • V5" "${ui_gold}${ui_bold}"
+  ui_line
+}
+
+ui_box_title(){ ui_dim_line; ui_center "${1:-MENU}" "${ui_gold}${ui_bold}"; ui_dim_line; }
+ui_sub_header(){ clear; ui_logo; ui_box_title "${1:-ENTERPRISE MODULE}"; }
+ui_sub_footer(){ ui_line; echo -e "${ui_dark}TUNNEL GO • ENTERPRISE MODULE • SECURE OPERATION${ui_reset}"; ui_line; }
+
+ui_label(){ printf "%b%-13s%b : %b%s%b\n" "$ui_gold" "$1" "$ui_reset" "$ui_white" "$2" "$ui_reset"; }
+ui_system_info(){
+  local os; os="$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"' || uname -s)"
+  ui_box_title "SYSTEM INFORMATION"
+  ui_label OS "$os"
+  ui_label UPTIME "$(uptime -p 2>/dev/null || echo '-')"
+  ui_label 'IP VPS' "$(ui_get_ip)"
+  ui_label DOMAIN "$(ui_get_domain)"
+  ui_label 'DATA CENTER' "$(ui_get_datacenter)"
+  ui_label 'CPU LOAD' "$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo '-')"
+  ui_label 'RAM USED' "$(free -m 2>/dev/null | awk 'NR==2{print $3"/"$2" MB"}' || echo '-')"
+  ui_label 'DISK USED' "$(df -h / 2>/dev/null | awk 'NR==2{print $3"/"$2" ("$5")"}' || echo '-')"
+}
+
+ui_status_text(){ local state="$1"; [ "$state" = ON ] && printf "%b%-3s%b" "$ui_green" ON "$ui_reset" || printf "%b%-3s%b" "$ui_red" OFF "$ui_reset"; }
+ui_row(){ local label="$1" state="$2" color; [ "$state" = ON ] && color="$ui_green" || color="$ui_red"; printf "%b● %-12s%b " "$color" "$label" "$ui_reset"; ui_status_text "$state"; }
+ui_row4(){ ui_row "$1" "$2"; printf "     "; ui_row "$3" "$4"; printf "     "; ui_row "$5" "$6"; printf "     "; ui_row "$7" "$8"; echo; }
+ui_row2(){ ui_row "$1" "$2"; printf "     "; ui_row "$3" "$4"; echo; }
+ui_service_status(){
+  ui_box_title "SERVICE STATUS"
+  local SSH DROPBEAR NGINX HAPROXY WSP API XRAY ZIVPN SINGBOX HYSTERIA2 TUIC WIREGUARD
+  SSH="$(service_status_value SSH 2>/dev/null || echo OFF)"
+  DROPBEAR="$(service_status_value DROPBEAR 2>/dev/null || echo OFF)"
+  NGINX="$(service_status_value NGINX 2>/dev/null || echo OFF)"
+  HAPROXY="$(service_status_value HAPROXY 2>/dev/null || echo OFF)"
+  WSP="$(service_status_value WS-PROXY 2>/dev/null || echo OFF)"
+  API="$(service_status_value API 2>/dev/null || echo OFF)"
+  XRAY="$(service_status_value XRAY 2>/dev/null || echo OFF)"
+  ZIVPN="$(service_status_value ZIVPN 2>/dev/null || echo OFF)"
+  SINGBOX="$(service_status_value SINGBOX 2>/dev/null || echo OFF)"
+  HYSTERIA2="$(service_status_value HYSTERIA2 2>/dev/null || echo OFF)"
+  TUIC="$(service_status_value TUIC 2>/dev/null || echo OFF)"
+  WIREGUARD="$(service_status_value WIREGUARD 2>/dev/null || echo OFF)"
+  ui_row4 SSH "$SSH" DROPBEAR "$DROPBEAR" NGINX "$NGINX" HAPROXY "$HAPROXY"
+  ui_row2 WS-PROXY "$WSP" API "$API"
+  echo
+  ui_row XRAY "$XRAY"; echo
+  echo
+  ui_row4 ZIVPN "$ZIVPN" SINGBOX "$SINGBOX" HYSTERIA2 "$HYSTERIA2" TUIC "$TUIC"
+  ui_row WIREGUARD "$WIREGUARD"; echo
+}
+ui_account_summary(){
+  ui_box_title "ACCOUNT SUMMARY"
+  if [ -f /etc/tunnel/tunnel.db ] && command -v sqlite3 >/dev/null 2>&1; then
+    local out
+    out="$(sqlite3 -noheader /etc/tunnel/tunnel.db "SELECT upper(protocol)||':'||COUNT(*) FROM accounts WHERE status IN ('active','trial') GROUP BY protocol ORDER BY protocol;" 2>/dev/null || true)"
+    if [ -n "$out" ]; then echo "$out" | while read -r x; do printf "%b%-18s%b" "$ui_cyan" "$x" "$ui_reset"; done; echo; else echo -e "${ui_dark}No active accounts yet${ui_reset}"; fi
+  else
+    echo -e "${ui_dark}Database not initialized${ui_reset}"
+  fi
+}
+ui_header(){ clear; ui_logo; ui_system_info; ui_service_status; ui_account_summary; }
+ui_footer(){ ui_line; echo -e "${ui_dark}CLIENT: ${ui_green}${ui_bold}TUNNEL GO${ui_reset}${ui_dark} | STATUS: ${ui_gold}${ui_bold}ENTERPRISE V5${ui_reset}${ui_dark} | WHITELIST: ${ui_cyan}${ui_bold}GITHUB IP CONTROL${ui_reset}"; echo -e "${ui_dark}© 2026 TUNNEL GO • PREMIUM AUTOSCRIPT • LIMITED ENTERPRISE EDITION${ui_reset}"; ui_line; }
+ui_wait(){ echo; read -rp 'Enter untuk kembali...' _; }
+ui_success(){ echo -e "${ui_green}[OK]${ui_reset} $*"; }
+ui_ok(){ ui_success "$@"; }
+ui_error(){ echo -e "${ui_red}[ERR]${ui_reset} $*" >&2; }
+ui_err(){ ui_error "$@"; }
+ui_warn(){ echo -e "${ui_yellow}[WARN]${ui_reset} $*"; }
+ui_info(){ echo -e "${ui_cyan}[INFO]${ui_reset} $*"; }
+print_ok(){ ui_success "$@"; }; print_err(){ ui_error "$@"; }; print_warn(){ ui_warn "$@"; }; print_info(){ ui_info "$@"; }

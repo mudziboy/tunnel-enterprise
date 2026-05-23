@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+rm -f /usr/bin/menu
+rm -rf /usr/local/tunnel
+echo "Script dihapus. Config /etc/tunnel tidak dihapus."

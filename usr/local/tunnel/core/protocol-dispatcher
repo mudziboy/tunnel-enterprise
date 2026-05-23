@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+import json, os, re, sqlite3, sys, uuid, secrets, datetime, ipaddress
+
+DB = "/etc/tunnel/tunnel.db"
+REGISTRY = "/etc/tunnel/protocols.json"
+PACKAGES = "/etc/tunnel/packages.json"
+NODE = "/etc/tunnel/node.json"
+DOMAIN = "/etc/tunnel/domain"
+PORTS = "/etc/tunnel/ports.env"
+WG_POOL = "/etc/tunnel/wireguard-pool.env"
+MSG_DIR = "/usr/local/tunnel/templates/messages"
+
+def read_file(path, default=""):
+    try:
+        return open(path, "r", encoding="utf-8").read()
+    except Exception:
+        return default
+
+def json_file(path, default):
+    try:
+        return json.loads(read_file(path))
+    except Exception:
+        return default
+
+def env_file(path):
+    out = {}
+    for line in read_file(path).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+def db():
+    os.makedirs(os.path.dirname(DB), exist_ok=True)
+    con = sqlite3.connect(DB)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,transport TEXT DEFAULT '',uuid TEXT,password TEXT,quota_gb INTEGER DEFAULT 0,ip_limit INTEGER DEFAULT 0,device_limit INTEGER DEFAULT 0,expired_at TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',note TEXT DEFAULT '',created_by TEXT DEFAULT 'local',node_id TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(username, protocol))")
+    con.execute("CREATE TABLE IF NOT EXISTS account_protocols (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,config TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(username,protocol))")
+    con.execute("CREATE TABLE IF NOT EXISTS account_protocol_details (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT NOT NULL,engine TEXT DEFAULT '',uuid TEXT DEFAULT '',password TEXT DEFAULT '',port TEXT DEFAULT '',path TEXT DEFAULT '',sni TEXT DEFAULT '',client_ip TEXT DEFAULT '',public_key TEXT DEFAULT '',private_key TEXT DEFAULT '',config_uri TEXT DEFAULT '',config_text TEXT DEFAULT '',message TEXT DEFAULT '',status TEXT DEFAULT 'active',expired_at TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(username,protocol))")
+    con.execute("CREATE TABLE IF NOT EXISTS account_events (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER,username TEXT NOT NULL,protocol TEXT NOT NULL,action TEXT NOT NULL,detail TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+    con.execute("CREATE TABLE IF NOT EXISTS wireguard_ip_pool (client_ip TEXT PRIMARY KEY,username TEXT DEFAULT '',status TEXT DEFAULT 'free',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+    con.execute("CREATE TABLE IF NOT EXISTS protocol_operations (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT DEFAULT '',protocol TEXT DEFAULT '',operation TEXT NOT NULL,status TEXT DEFAULT '',detail TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+    con.commit()
+    return con
+
+def node_id():
+    return json_file(NODE, {}).get("node_id", "")
+
+def host():
+    d = read_file(DOMAIN).strip()
+    if d:
+        return d
+    n = json_file(NODE, {})
+    return n.get("domain") or n.get("public_ip") or "SERVER_IP"
+
+def port_for(proto):
+    e = env_file(PORTS)
+    key_map = {
+        "ssh": "SSH_PORTS",
+        "vmess_ws": "NGINX_HTTPS_PORT",
+        "vless_ws": "NGINX_HTTPS_PORT",
+        "trojan_ws": "NGINX_HTTPS_PORT",
+        "shadowsocks": "NGINX_HTTPS_PORT",
+        "singbox_vless_ws": "NGINX_HTTPS_PORT",
+        "singbox_trojan_ws": "NGINX_HTTPS_PORT",
+        "zivpn": "ZIVPN_PORTS",
+        "hysteria2": "HYSTERIA2_PORT",
+        "singbox_hysteria2": "HYSTERIA2_PORT",
+        "tuic": "TUIC_PORT",
+        "singbox_tuic": "TUIC_PORT",
+        "wireguard": "WIREGUARD_PORT",
+    }
+    if key_map.get(proto) in e and e[key_map[proto]]:
+        return e[key_map[proto]]
+    defaults = {
+        "ssh": "22,109",
+        "zivpn": "6000-10008",
+        "wireguard": "51820",
+        "hysteria2": "443",
+        "singbox_hysteria2": "443",
+        "tuic": "443",
+        "singbox_tuic": "443",
+    }
+    return defaults.get(proto, "443")
+
+def make_uri(proto, username, password, uid, h, port):
+    if proto == "vmess_ws":
+        return f"vmess://{uid}@{h}:{port}?type=ws&security=tls#{username}"
+    if proto in ("vless_ws", "singbox_vless_ws"):
+        return f"vless://{uid}@{h}:{port}?type=ws&security=tls#{username}"
+    if proto in ("trojan_ws", "singbox_trojan_ws"):
+        return f"trojan://{password}@{h}:{port}?type=ws&security=tls#{username}"
+    if proto == "shadowsocks":
+        return f"ss://{password}@{h}:{port}#{username}"
+    if proto in ("hysteria2", "singbox_hysteria2"):
+        return f"hysteria2://{password}@{h}:{port}?sni={h}#{username}"
+    if proto in ("tuic", "singbox_tuic"):
+        return f"tuic://{uid}:{password}@{h}:{port}?sni={h}&congestion_control=bbr#{username}"
+    if proto == "wireguard":
+        return f"wireguard://{username}@{h}:{port}#{username}"
+    if proto == "ssh":
+        return f"ssh://{username}:{password}@{h}:{port}#{username}"
+    if proto == "zivpn":
+        return f"zivpn://{username}:{password}@{h}:{port}#{username}"
+    return f"{proto}://{username}@{h}:{port}#{username}"
+
+def render_message(proto, title, engine, username, password, uid, h, port, expired, quota, ip_limit, uri):
+    tpl = read_file(os.path.join(MSG_DIR, f"{proto}.txt.tpl"))
+    if not tpl:
+        tpl = read_file(os.path.join(MSG_DIR, "all-in-one.txt.tpl"))
+    if not tpl:
+        tpl = "{{TITLE}}\nUsername: {{USERNAME}}\nPassword: {{PASSWORD}}\nURI: {{CONFIG_URI}}"
+    repl = {
+        "{{TITLE}}": title,
+        "{{ENGINE}}": engine,
+        "{{HOST}}": h,
+        "{{PORT}}": str(port),
+        "{{USERNAME}}": username,
+        "{{PASSWORD}}": password,
+        "{{UUID}}": uid,
+        "{{EXPIRED_AT}}": expired,
+        "{{IP_LIMIT}}": str(ip_limit),
+        "{{QUOTA_GB}}": str(quota),
+        "{{CONFIG_URI}}": uri,
+    }
+    for k, v in repl.items():
+        tpl = tpl.replace(k, str(v))
+    return tpl.strip()
+
+def init_wg_pool(con):
+    env = env_file(WG_POOL)
+    cidr = env.get("WG_CLIENT_CIDR", "10.66.66.0/24")
+    try:
+        net = ipaddress.ip_network(cidr, strict=False)
+        hosts = list(net.hosts())[1:254]
+    except Exception:
+        hosts = [ipaddress.ip_address(f"10.66.66.{i}") for i in range(2, 255)]
+    for ip in hosts:
+        con.execute("INSERT OR IGNORE INTO wireguard_ip_pool(client_ip,status) VALUES(?, 'free')", (str(ip),))
+    con.commit()
+
+def assign_wg_ip(con, username):
+    init_wg_pool(con)
+    row = con.execute("SELECT client_ip FROM wireguard_ip_pool WHERE status='free' ORDER BY client_ip LIMIT 1").fetchone()
+    if not row:
+        return ""
+    ip = row[0]
+    con.execute("UPDATE wireguard_ip_pool SET username=?,status='used',updated_at=CURRENT_TIMESTAMP WHERE client_ip=?", (username, ip))
+    con.commit()
+    return ip
+
+def create(payload):
+    registry = json_file(REGISTRY, {"protocols": {}}).get("protocols", {})
+    username = str(payload.get("username") or "")
+    if not re.match(r"^[a-zA-Z0-9._-]{3,32}$", username):
+        return {"success": False, "error_code": "ACCOUNT_USERNAME_INVALID", "message": "Username tidak valid"}
+    protocols = payload.get("protocols") or [payload.get("protocol") or "ssh"]
+    protocols = [str(p).lower() for p in protocols]
+    days = int(payload.get("expired_days") or payload.get("days") or 30)
+    password = str(payload.get("password") or secrets.token_hex(6))
+    quota = int(payload.get("quota_gb") or 0)
+    ip_limit = int(payload.get("ip_limit") or 1)
+    device_limit = int(payload.get("device_limit") or ip_limit)
+    expired = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+    h = host()
+    con = db()
+    outputs = []
+    messages = []
+    first_uri = ""
+    for proto in protocols:
+        meta = registry.get(proto)
+        if not meta or meta.get("enabled") is False:
+            outputs.append({"protocol": proto, "success": False, "error_code": "PROTOCOL_NOT_SUPPORTED"})
+            continue
+        engine = meta.get("engine", "")
+        title = meta.get("title", proto)
+        uid = str(uuid.uuid4())
+        port = port_for(proto)
+        client_ip = assign_wg_ip(con, username) if proto == "wireguard" else ""
+        uri = make_uri(proto, username, password, uid, h, port)
+        msg = render_message(proto, title, engine, username, password, uid, h, port, expired, quota, ip_limit, uri)
+        con.execute("""INSERT OR REPLACE INTO accounts(username,protocol,transport,uuid,password,quota_gb,ip_limit,device_limit,expired_at,status,created_by,node_id,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,'active','api',?,CURRENT_TIMESTAMP)""",
+                    (username, proto, engine, uid, password, quota, ip_limit, device_limit, expired, node_id()))
+        con.execute("""INSERT OR REPLACE INTO account_protocol_details(username,protocol,engine,uuid,password,port,client_ip,config_uri,config_text,message,status,expired_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,'active',?,CURRENT_TIMESTAMP)""",
+                    (username, proto, engine, uid, password, port, client_ip, uri, uri, msg, expired))
+        con.execute("INSERT OR REPLACE INTO account_protocols(username,protocol,config) VALUES(?,?,?)", (username, proto, uri))
+        con.execute("INSERT INTO account_events(username,protocol,action,detail) VALUES(?,?,?,?)", (username, proto, "create", uri))
+        con.execute("INSERT INTO protocol_operations(username,protocol,operation,status,detail) VALUES(?,?,?,?,?)", (username, proto, "create", "success", uri))
+        con.commit()
+        if not first_uri:
+            first_uri = uri
+        outputs.append({"protocol": proto, "engine": engine, "success": True, "uuid": uid, "port": port, "client_ip": client_ip, "config_uri": uri})
+        messages.append(msg)
+    con.close()
+    return {"success": True, "username": username, "password": password, "expired_at": expired, "quota_gb": quota, "ip_limit": ip_limit, "device_limit": device_limit, "config_uri": first_uri, "protocol_results": outputs, "message": "\n\n".join(messages)}
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "create":
+        try:
+            payload = json.loads(sys.argv[2] if len(sys.argv) > 2 else "{}")
+        except Exception as e:
+            print(json.dumps({"success": False, "error_code": "INVALID_JSON", "message": str(e)}))
+            sys.exit(1)
+        print(json.dumps(create(payload), ensure_ascii=False))
+    elif cmd == "protocols":
+        print(read_file(REGISTRY))
+    elif cmd == "packages":
+        print(read_file(PACKAGES))
+    elif cmd == "message":
+        username = sys.argv[2]
+        proto = sys.argv[3]
+        con = db()
+        row = con.execute("SELECT message FROM account_protocol_details WHERE username=? AND protocol=? LIMIT 1", (username, proto)).fetchone()
+        print(json.dumps({"message": row[0] if row else ""}, ensure_ascii=False))
+    else:
+        print("Usage: protocol-dispatcher create '<json>' | protocols | packages | message <user> <protocol>", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

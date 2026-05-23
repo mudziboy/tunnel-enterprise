@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+[ "$(id -u)" -eq 0 ] || { ui_error "Jalankan sebagai root"; exit 1; }
+mkdir -p /etc/tunnel/runtime/ssh
+[ -f /etc/ssh/sshd_config ] && cp -a /etc/ssh/sshd_config "/etc/tunnel/runtime/ssh/sshd_config.repair.$(date +%Y%m%d-%H%M%S).bak"
+set_sshd(){ local key="$1" value="$2"; if grep -Eq "^[#[:space:]]*$key[[:space:]]+" /etc/ssh/sshd_config; then sed -i -E "s|^[#[:space:]]*$key[[:space:]]+.*|$key $value|" /etc/ssh/sshd_config; else echo "$key $value" >> /etc/ssh/sshd_config; fi; }
+set_sshd PasswordAuthentication yes
+set_sshd KbdInteractiveAuthentication yes
+set_sshd PubkeyAuthentication yes
+set_sshd UsePAM yes
+set_sshd PermitRootLogin yes
+passwd -u root >/dev/null 2>&1 || true
+usermod -s /bin/bash root >/dev/null 2>&1 || true
+faillock --user root --reset >/dev/null 2>&1 || true
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+ui_success "SSH login diperbaiki. Jika password root lupa, jalankan: passwd root"

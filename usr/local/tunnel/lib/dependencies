@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+DEPS_BASE=(bash coreutils grep sed gawk curl wget ca-certificates openssl jq sqlite3 uuid-runtime iproute2 procps lsof net-tools)
+DEPS_NETWORK=(dnsutils netcat-openbsd)
+DEPS_OPTIONAL=(unzip tar gzip cron logrotate)
+detect_pkg_manager(){ if command -v apt-get >/dev/null 2>&1; then echo apt; elif command -v dnf >/dev/null 2>&1; then echo dnf; elif command -v yum >/dev/null 2>&1; then echo yum; else echo unknown; fi; }
+install_apt_packages(){ export DEBIAN_FRONTEND=noninteractive; apt-get update -y; apt-get install -y "$@"; }
+install_packages(){ local pm; pm="$(detect_pkg_manager)"; case "$pm" in apt) install_apt_packages "$@" ;; dnf) dnf install -y "$@" ;; yum) yum install -y "$@" ;; *) echo "Package manager tidak didukung"; return 1 ;; esac; }
+install_base_dependencies(){ install_packages "${DEPS_BASE[@]}" "${DEPS_NETWORK[@]}" "${DEPS_OPTIONAL[@]}"; }
+install_nodejs_20(){ if command -v node >/dev/null 2>&1; then major="$(node -v | sed 's/v//' | cut -d. -f1)"; [ "$major" -ge 18 ] 2>/dev/null && return 0; fi; if command -v apt-get >/dev/null 2>&1; then curl -fsSL https://deb.nodesource.com/setup_20.x | bash -; apt-get install -y nodejs; else install_packages nodejs npm; fi; }
+install_api_dependencies(){ install_nodejs_20; command -v pm2 >/dev/null 2>&1 || npm install -g pm2 --no-audit --no-fund; }
+check_dependency_report(){ local commands=(bash grep sed awk gawk curl wget openssl jq sqlite3 uuidgen ip ss systemctl journalctl iptables tar gzip unzip); echo "Dependency Report"; echo "================="; for cmd in "${commands[@]}"; do command -v "$cmd" >/dev/null 2>&1 && printf '%-16s OK\n' "$cmd" || printf '%-16s MISSING\n' "$cmd"; done; echo; echo "Node.js"; echo "======="; command -v node >/dev/null 2>&1 && node -v || echo not-installed; }

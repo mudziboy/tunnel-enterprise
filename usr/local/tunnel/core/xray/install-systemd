@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common
+require_root
+if ! command -v xray >/dev/null 2>&1; then echo "Xray belum tersedia. Menginstall Xray terlebih dahulu..."; /usr/local/tunnel/core/xray/install-xray; fi
+install -d /etc/xray/vmess /etc/xray/vless /etc/xray/trojan /etc/xray/shadowsocks /var/log/xray
+make_service(){ local name="$1" dir="$2" title="$3"; cat > "/etc/systemd/system/${name}@.service" <<EOF
+[Unit]
+Description=Xray ${title} Service %i
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=root
+ExecStart=/usr/local/bin/xray run -config /etc/xray/${dir}/%i.json
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+make_service vmess vmess VMess
+make_service vless vless VLESS
+make_service trojan trojan Trojan
+make_service shadowsocks shadowsocks Shadowsocks
+systemctl daemon-reload
+print_ok "Xray systemd service template siap"

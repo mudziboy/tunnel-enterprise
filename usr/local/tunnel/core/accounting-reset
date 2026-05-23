@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+db_init >/dev/null 2>&1
+scope="${1:-soft}"
+case "$scope" in
+  soft)
+    sqlite3 "$TUNNEL_DB" "DELETE FROM traffic_counters; UPDATE accounting_rules SET last_rx_bytes=0,last_tx_bytes=0,updated_at=CURRENT_TIMESTAMP; INSERT INTO accounting_events(event,backend,payload) VALUES('counter.reset','database','{"scope":"soft"}');"
+    echo "Accounting baselines reset. Firewall rules are preserved."
+    ;;
+  full)
+    /usr/local/tunnel/core/nft-accounting reset >/dev/null 2>&1 || true
+    /usr/local/tunnel/core/iptables-accounting reset >/dev/null 2>&1 || true
+    sqlite3 "$TUNNEL_DB" "DELETE FROM traffic_counters; DELETE FROM accounting_rules; INSERT INTO accounting_events(event,backend,payload) VALUES('counter.reset','all','{"scope":"full"}');"
+    echo "Accounting rules and baselines reset."
+    ;;
+  *) echo "Usage: accounting-reset {soft|full}" >&2; exit 2 ;;
+esac

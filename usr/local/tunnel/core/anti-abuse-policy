@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+TUNNEL_DB="${TUNNEL_DB:-/etc/tunnel/tunnel.db}"
+POLICY_FILE="/etc/tunnel/anti-abuse.env"
+[ -f "$POLICY_FILE" ] && . "$POLICY_FILE"
+ABUSE_MAX_SESSIONS_PER_USER="${ABUSE_MAX_SESSIONS_PER_USER:-8}"
+ABUSE_MAX_IPS_PER_USER="${ABUSE_MAX_IPS_PER_USER:-3}"
+ABUSE_MAX_UDP_MB_PER_5MIN="${ABUSE_MAX_UDP_MB_PER_5MIN:-2048}"
+ABUSE_MAX_TOTAL_GB_PER_DAY="${ABUSE_MAX_TOTAL_GB_PER_DAY:-100}"
+ABUSE_EVENT_ONLY_MODE="${ABUSE_EVENT_ONLY_MODE:-1}"
+ABUSE_LOCK_ON_UDP_SPIKE="${ABUSE_LOCK_ON_UDP_SPIKE:-0}"
+esc(){ db_escape "$1"; }
+init(){ db_init >/dev/null 2>&1; sqlite3 "$TUNNEL_DB" <<'SQL'
+CREATE TABLE IF NOT EXISTS abuse_events (id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,protocol TEXT DEFAULT '',severity TEXT DEFAULT 'warning',rule TEXT NOT NULL,value INTEGER DEFAULT 0,limit_value INTEGER DEFAULT 0,action TEXT DEFAULT 'event',payload TEXT DEFAULT '{}',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS abuse_policies (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_abuse_events_user ON abuse_events(username,protocol,created_at);
+SQL
+}
+event(){
+  local user="$1" proto="$2" severity="$3" rule="$4" value="$5" limit="$6" action="$7" payload="$8"
+  sqlite3 "$TUNNEL_DB" "INSERT INTO abuse_events(username,protocol,severity,rule,value,limit_value,action,payload) VALUES('$(esc "$user")','$(esc "$proto")','$(esc "$severity")','$(esc "$rule")',$value,$limit,'$(esc "$action")','$(esc "$payload")'); INSERT INTO events(event,username,protocol,payload) VALUES('abuse.$rule','$(esc "$user")','$(esc "$proto")','$(esc "$payload")'); INSERT INTO outbox(event_id,event,payload) VALUES(last_insert_rowid(),'abuse.$rule','$(esc "$payload")');" >/dev/null 2>&1 || true
+}
+lock_user(){
+  local user="$1" proto="$2" reason="$3"
+  [ "$ABUSE_EVENT_ONLY_MODE" = "1" ] && return 0
+  sqlite3 "$TUNNEL_DB" "UPDATE accounts SET status='locked',note='anti-abuse: $(esc "$reason")',updated_at=CURRENT_TIMESTAMP WHERE username='$(esc "$user")' AND (protocol='$(esc "$proto")' OR '$(esc "$proto")'='');" >/dev/null 2>&1 || true
+  /usr/local/tunnel/core/enforcement-actions apply "$user" "${proto:-ssh}" "anti-abuse:$reason" >/dev/null 2>&1 || true
+}
+check_sessions(){
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT username,protocol,COUNT(*),COUNT(DISTINCT remote_ip) FROM sessions WHERE status='active' GROUP BY username,protocol;" | while IFS='|' read -r user proto sessions ips; do
+    [ -n "$user" ] || continue
+    if [ "${sessions:-0}" -gt "$ABUSE_MAX_SESSIONS_PER_USER" ]; then
+      event "$user" "$proto" "critical" "session_spike" "$sessions" "$ABUSE_MAX_SESSIONS_PER_USER" "lock_candidate" "{\"sessions\":$sessions,\"limit\":$ABUSE_MAX_SESSIONS_PER_USER}"
+      lock_user "$user" "$proto" "session_spike"
+    fi
+    if [ "${ips:-0}" -gt "$ABUSE_MAX_IPS_PER_USER" ]; then
+      event "$user" "$proto" "critical" "ip_spike" "$ips" "$ABUSE_MAX_IPS_PER_USER" "lock_candidate" "{\"ips\":$ips,\"limit\":$ABUSE_MAX_IPS_PER_USER}"
+      lock_user "$user" "$proto" "ip_spike"
+    fi
+  done
+}
+check_udp_spike(){
+  local limit_bytes=$(( ABUSE_MAX_UDP_MB_PER_5MIN * 1024 * 1024 ))
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT username,protocol,COALESCE(SUM(rx_delta+tx_delta),0) FROM udp_accounting_snapshots WHERE collected_at >= datetime('now','-5 minutes') GROUP BY username,protocol;" | while IFS='|' read -r user proto bytes; do
+    [ -n "$user" ] || continue
+    if [ "${bytes:-0}" -gt "$limit_bytes" ]; then
+      event "$user" "$proto" "warning" "udp_spike_5m" "$bytes" "$limit_bytes" "event" "{\"bytes_5m\":$bytes,\"limit\":$limit_bytes}"
+      [ "$ABUSE_LOCK_ON_UDP_SPIKE" = "1" ] && lock_user "$user" "$proto" "udp_spike_5m"
+    fi
+  done
+}
+check_daily_total(){
+  local limit_bytes=$(( ABUSE_MAX_TOTAL_GB_PER_DAY * 1024 * 1024 * 1024 ))
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT username,protocol,COALESCE(SUM(uplink_bytes+downlink_bytes),0) FROM traffic_usage WHERE collected_at >= date('now') GROUP BY username,protocol;" | while IFS='|' read -r user proto bytes; do
+    [ -n "$user" ] || continue
+    if [ "${bytes:-0}" -gt "$limit_bytes" ]; then
+      event "$user" "$proto" "critical" "daily_total_exceeded" "$bytes" "$limit_bytes" "lock_candidate" "{\"bytes_today\":$bytes,\"limit\":$limit_bytes}"
+      lock_user "$user" "$proto" "daily_total_exceeded"
+    fi
+  done
+}
+init
+/usr/local/tunnel/core/session-monitor --json >/dev/null 2>&1 || true
+/usr/local/tunnel/core/udp-accounting-collector --json >/dev/null 2>&1 || true
+check_sessions
+check_udp_spike
+check_daily_total
+case "${1:-table}" in
+  --json|json) sqlite3 -json "$TUNNEL_DB" "SELECT * FROM abuse_events ORDER BY id DESC LIMIT 200;" ;;
+  *) sqlite3 -header -column "$TUNNEL_DB" "SELECT id,username,protocol,severity,rule,value,limit_value,action,created_at FROM abuse_events ORDER BY id DESC LIMIT 50;" ;;
+esac

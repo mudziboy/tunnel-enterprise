@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+mode="${1:-}"; [ "$mode" = on ] || [ "$mode" = off ] || { echo "Usage: node-maintenance on|off"; exit 1; }
+val=false; [ "$mode" = on ] && val=true
+tmp=$(mktemp)
+jq --argjson v "$val" '.maintenance_mode=$v' /etc/tunnel/node.json > "$tmp" && mv "$tmp" /etc/tunnel/node.json
+chmod 600 /etc/tunnel/node.json
+echo "maintenance_mode=$val"

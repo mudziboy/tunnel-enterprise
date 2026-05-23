@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+while true; do
+  clear
+  echo "ZiVPN Manager"
+  echo "1. Install ZiVPN"
+  echo "2. Add ZiVPN"
+  echo "3. Delete ZiVPN"
+  echo "4. Renew ZiVPN"
+  echo "5. Trial ZiVPN"
+  echo "6. List ZiVPN"
+  echo "7. Render ZiVPN Config"
+  echo "8. Status ZiVPN"
+  echo "9. Apply ZiVPN Firewall"
+  echo "10. Remove ZiVPN Firewall"
+  echo "11. Uninstall ZiVPN"
+  echo "12. Back"
+  read -rp "Pilih menu: " opt
+
+  case "$opt" in
+    1) /usr/local/tunnel/core/zivpn/install-zivpn ;;
+    2) /usr/local/tunnel/core/zivpn/add-zivpn ;;
+    3) /usr/local/tunnel/core/zivpn/delete-zivpn ;;
+    4) /usr/local/tunnel/core/zivpn/renew-zivpn ;;
+    5) /usr/local/tunnel/core/zivpn/trial-zivpn ;;
+    6) /usr/local/tunnel/core/zivpn/list-zivpn ;;
+    7) /usr/local/tunnel/core/zivpn/render-zivpn-config ;;
+    8) /usr/local/tunnel/core/zivpn/status-zivpn ;;
+    9) /usr/local/tunnel/core/zivpn/apply-zivpn-firewall ;;
+    10) /usr/local/tunnel/core/zivpn/remove-zivpn-firewall ;;
+    11) /usr/local/tunnel/core/zivpn/uninstall-zivpn ;;
+    12) exit 0 ;;
+    *) read -rp "Pilihan tidak valid. Enter untuk kembali..." _ ;;
+  esac
+  read -rp "Enter untuk kembali..." _
+done

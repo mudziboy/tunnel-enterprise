@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+
+require_root
+
+find /usr/local/tunnel/logs -type f -name "*.log" -exec truncate -s 0 {} \; 2>/dev/null || true
+find /var/log/xray -type f -name "*.log" -exec truncate -s 0 {} \; 2>/dev/null || true
+journalctl --vacuum-time=3d >/dev/null 2>&1 || true
+
+print_ok "Log dibersihkan"

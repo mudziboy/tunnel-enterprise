@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/account
+load_tunnel_config
+account_init
+username="${1:-}"; days="${2:-}"; quota="${3:-0}"; iplimit="${4:-0}"; password="${6:-}"
+[ -n "$username" ] || read -rp 'Username: ' username
+require_valid_username "$username"
+[ -n "$days" ] || read -rp 'Masa aktif hari: ' days
+is_valid_days "$days" || { echo 'Hari tidak valid'; exit 1; }
+[ -n "$password" ] || { read -rsp 'Password: ' password; echo; }
+[ -n "$password" ] || password="$(account_random_secret)"
+if getent passwd "$username" >/dev/null 2>&1; then usermod -s /bin/bash "$username"; else useradd -M -N -s /bin/bash "$username"; fi
+echo "$username:$password" | chpasswd
+expired="$(date -d "+$days days" '+%Y-%m-%d')"
+chage -E "$expired" "$username"
+mkdir -p /etc/tunnel/users/ssh
+printf '%s\n' "$expired" > "/etc/tunnel/users/ssh/$username.expired"; printf '%s\n' "$iplimit" > "/etc/tunnel/users/ssh/$username.iplimit"; printf '%s\n' "$quota" > "/etc/tunnel/users/ssh/$username.quota"
+if ! db_account_exists "$username" ssh; then db_add_account "$username" ssh tcp '' "$password" "$quota" "$iplimit" "$expired" active '' local; aid="$(db_account_id "$username" ssh)"; db_log_event "$aid" "$username" ssh add "days=$days quota_gb=$quota ip_limit=$iplimit"; else db_update_account_expiry "$username" ssh "$expired"; db_update_account_limit "$username" ssh "$quota" "$iplimit"; fi
+domain="$(cat /etc/tunnel/domain 2>/dev/null|tr -d ' \t\r\n'||true)"; host="${domain:-$(curl -4s --max-time 3 ipv4.icanhazip.com 2>/dev/null|tr -d '\n')}"; dropbear="${DROPBEAR_PORTS:-109,143}"
+cat <<EOF
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          SSH ACCOUNT • TUNNEL GO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Host/IP        : $host
+Username       : $username
+Password       : $password
+Expired        : $expired
+Limit IP       : $iplimit
+Quota          : ${quota} GB
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OpenSSH        : ${SSH_PORT:-22}
+Dropbear       : $dropbear
+SSH WebSocket  : ${HTTPS_PORT:-443}
+WS Path        : /sshws
+OpenVPN TCP    : ${OPENVPN_TCP_PORT:-1194}
+OpenVPN UDP    : ${OPENVPN_UDP_PORT:-2200}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Payload WS:
+GET /sshws HTTP/1.1[crlf]Host: $host[crlf]Upgrade: websocket[crlf][crlf]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EOF

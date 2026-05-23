@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/dependencies
+
+require_root
+install_packages nginx
+/usr/local/tunnel/proxy/nginx/render-nginx-config
+
+nginx -t
+systemctl enable nginx >/dev/null 2>&1
+systemctl restart nginx
+
+print_ok "Nginx siap"

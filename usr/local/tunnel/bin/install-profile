@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+profile="${1:-}"
+if [ -z "$profile" ]; then
+  echo -e "${ui_cyan}Profile tersedia:${ui_reset} base, minimal, standard, full"
+  read -rp "Masukkan profile: " profile
+fi
+case "$profile" in base|minimal|standard|full) ;; *) ui_error "Profile tidak valid: base, minimal, standard, full"; exit 1;; esac
+run(){ local label="$1"; shift; if "$@"; then ui_success "$label selesai"; else ui_warn "$label gagal/dilewati. Cek diagnostic sebelum lanjut."; fi; }
+ui_info "Menjalankan profile: $profile"
+run "Dependencies" /usr/local/tunnel/tools/install-dependencies
+run "Database" /usr/local/tunnel/tools/db-init
+run "SSH safe setup" /usr/local/tunnel/core/ssh/install-ssh
+run "Connection optimizer" /usr/local/tunnel/tools/connection-optimizer
+run "Tunnel guard" /usr/local/tunnel/tools/install-guard
+run "UDP accounting" /usr/local/tunnel/tools/install-udp-accounting
+case "$profile" in
+  base) ;;
+  minimal)
+    run "WebSocket proxy" /usr/local/tunnel/proxy/websocket/install-ws-proxy
+    run "Xray core" /usr/local/tunnel/core/xray/install-xray
+    run "Xray systemd" /usr/local/tunnel/core/xray/install-systemd
+    run "Xray config" /usr/local/tunnel/core/xray/render-xray-config --all
+    ;;
+  standard)
+    run "WebSocket proxy" /usr/local/tunnel/proxy/websocket/install-ws-proxy
+    run "Nginx" /usr/local/tunnel/proxy/nginx/install-nginx
+    run "HAProxy" /usr/local/tunnel/proxy/haproxy/install-haproxy
+    run "Xray core" /usr/local/tunnel/core/xray/install-xray
+    run "Xray systemd" /usr/local/tunnel/core/xray/install-systemd
+    run "Xray config" /usr/local/tunnel/core/xray/render-xray-config --all
+    run "ZiVPN" /usr/local/tunnel/core/zivpn/install-zivpn
+    run "Safe security" /usr/local/tunnel/tools/security-hardening
+    run "Auto backup" /usr/local/tunnel/tools/auto-backup
+    ;;
+  full)
+    run "WebSocket proxy" /usr/local/tunnel/proxy/websocket/install-ws-proxy
+    run "Nginx" /usr/local/tunnel/proxy/nginx/install-nginx
+    run "HAProxy" /usr/local/tunnel/proxy/haproxy/install-haproxy
+    run "Xray core" /usr/local/tunnel/core/xray/install-xray
+    run "Xray systemd" /usr/local/tunnel/core/xray/install-systemd
+    run "Xray config" /usr/local/tunnel/core/xray/render-xray-config --all
+    run "OpenVPN" /usr/local/tunnel/core/openvpn/install-openvpn
+    run "ZiVPN" /usr/local/tunnel/core/zivpn/install-zivpn
+    run "Sing-box" /usr/local/tunnel/core/sing-box/install-sing-box
+    run "Hysteria2" timeout 300 /usr/local/tunnel/core/hysteria2/install-hysteria2
+    run "TUIC" /usr/local/tunnel/core/tuic/install-tuic
+    run "WireGuard" /usr/local/tunnel/core/wireguard/install-wireguard
+    run "API" /usr/local/tunnel/api/install-api
+    run "Safe security" /usr/local/tunnel/tools/security-hardening
+    run "Auto backup" /usr/local/tunnel/tools/auto-backup
+    ;;
+esac
+ln -sf /usr/local/tunnel/bin/install-profile /usr/local/tunnel/install-profile 2>/dev/null || true
+ui_success "Profile selesai: $profile"

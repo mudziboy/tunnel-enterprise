@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+while true; do
+  ui_sub_header "API SERVER MANAGER"
+  echo -e "${ui_red}[1]${ui_white} Install API             ${ui_blue}[5]${ui_white} Status API${ui_reset}"
+  echo -e "${ui_yellow}[2]${ui_white} Start API               ${ui_blue}[6]${ui_white} Info API${ui_reset}"
+  echo -e "${ui_green}[3]${ui_white} Stop API                ${ui_blue}[7]${ui_white} Database Status${ui_reset}"
+  echo -e "${ui_cyan}[4]${ui_white} Restart API             ${ui_red}[X]${ui_white} Back${ui_reset}"
+  ui_sub_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in 1) /usr/local/tunnel/api/install-api;; 2) pm2 start /usr/local/tunnel/api/ecosystem.config.js;; 3) pm2 delete tunnel-api;; 4) pm2 restart tunnel-api;; 5) pm2 status tunnel-api;; 6) /usr/local/tunnel/tools/info-api;; 7) /usr/local/tunnel/tools/db-status;; x|X) exit 0;; *) echo 'Pilihan tidak valid';; esac
+  ui_wait
+done

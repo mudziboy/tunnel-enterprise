@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+
+require_root
+load_tunnel_config
+
+domain="$(get_domain || true)"
+pem="/etc/tunnel/runtime/haproxy.pem"
+mkdir -p /etc/tunnel/runtime
+
+if [ -f /etc/xray/xray.crt ] && [ -f /etc/xray/xray.key ]; then
+  cat /etc/xray/xray.crt /etc/xray/xray.key > "$pem"
+elif [ -n "$domain" ] && [ -f "/root/.acme.sh/${domain}/fullchain.cer" ] && [ -f "/root/.acme.sh/${domain}/${domain}.key" ]; then
+  cat "/root/.acme.sh/${domain}/fullchain.cer" "/root/.acme.sh/${domain}/${domain}.key" > "$pem"
+elif [ -n "$domain" ] && [ -f "/root/.acme.sh/${domain}_ecc/fullchain.cer" ] && [ -f "/root/.acme.sh/${domain}_ecc/${domain}.key" ]; then
+  cat "/root/.acme.sh/${domain}_ecc/fullchain.cer" "/root/.acme.sh/${domain}_ecc/${domain}.key" > "$pem"
+else
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -subj "/CN=${domain:-tunnel.local}" \
+    -keyout /etc/tunnel/runtime/haproxy.key \
+    -out /etc/tunnel/runtime/haproxy.crt >/dev/null 2>&1
+  cat /etc/tunnel/runtime/haproxy.crt /etc/tunnel/runtime/haproxy.key > "$pem"
+fi
+
+chmod 600 "$pem"
+print_ok "Certificate HAProxy siap: $pem"

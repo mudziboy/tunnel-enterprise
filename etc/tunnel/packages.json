@@ -1,0 +1,97 @@
+{
+  "version": "5.5",
+  "packages": [
+    {
+      "id": "ssh-ws-30d",
+      "name": "SSH WebSocket 30 Hari",
+      "duration_days": 30,
+      "protocols": [
+        "ssh"
+      ],
+      "quota_gb": 0,
+      "ip_limit": 2,
+      "device_limit": 2,
+      "price": 0,
+      "active": true
+    },
+    {
+      "id": "xray-basic-30d",
+      "name": "Xray Basic 30 Hari",
+      "duration_days": 30,
+      "protocols": [
+        "vmess_ws",
+        "vless_ws",
+        "trojan_ws"
+      ],
+      "quota_gb": 0,
+      "ip_limit": 2,
+      "device_limit": 2,
+      "price": 0,
+      "active": true
+    },
+    {
+      "id": "udp-pack-30d",
+      "name": "UDP Pack 30 Hari",
+      "duration_days": 30,
+      "protocols": [
+        "zivpn",
+        "hysteria2",
+        "tuic"
+      ],
+      "quota_gb": 0,
+      "ip_limit": 2,
+      "device_limit": 2,
+      "price": 0,
+      "active": true
+    },
+    {
+      "id": "wireguard-30d",
+      "name": "WireGuard Private 30 Hari",
+      "duration_days": 30,
+      "protocols": [
+        "wireguard"
+      ],
+      "quota_gb": 0,
+      "ip_limit": 1,
+      "device_limit": 1,
+      "price": 0,
+      "active": true
+    },
+    {
+      "id": "singbox-premium-30d",
+      "name": "Sing-box Premium 30 Hari",
+      "duration_days": 30,
+      "protocols": [
+        "singbox_vless_ws",
+        "singbox_trojan_ws",
+        "singbox_hysteria2",
+        "singbox_tuic"
+      ],
+      "quota_gb": 0,
+      "ip_limit": 2,
+      "device_limit": 2,
+      "price": 0,
+      "active": true
+    },
+    {
+      "id": "all-protocol-30d",
+      "name": "All Protocol 30 Hari",
+      "duration_days": 30,
+      "protocols": [
+        "ssh",
+        "vless_ws",
+        "trojan_ws",
+        "shadowsocks",
+        "zivpn",
+        "hysteria2",
+        "tuic",
+        "wireguard"
+      ],
+      "quota_gb": 0,
+      "ip_limit": 2,
+      "device_limit": 2,
+      "price": 0,
+      "active": true
+    }
+  ]
+}

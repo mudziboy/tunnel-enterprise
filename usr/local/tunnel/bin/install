@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+install -d /usr/local/tunnel
+install -d /etc/tunnel
+cp -a "$SRC_DIR/usr/local/tunnel/." /usr/local/tunnel/
+cp -a "$SRC_DIR/etc/tunnel/." /etc/tunnel/
+
+find /usr/local/tunnel -type f -exec sed -i 's/\r$//' {} \;
+find /usr/local/tunnel -type f -exec chmod 755 {} \;
+find /etc/tunnel -type f -exec chmod 600 {} \;
+chmod 644 /etc/tunnel/config.env /etc/tunnel/ports.env /etc/tunnel/domain /etc/tunnel/license 2>/dev/null || true
+
+ln -sf /usr/local/tunnel/bin/menu /usr/bin/menu
+ln -sf /usr/local/tunnel/tools/diagnostic /usr/bin/tunnel-diagnostic
+ln -sf /usr/local/tunnel/tools/health-check /usr/bin/tunnel-health
+ln -sf /usr/local/tunnel/tools/check-dependencies /usr/bin/tunnel-check-deps
+ln -sf /usr/local/tunnel/tools/db-status /usr/bin/tunnel-db-status
+
+if command -v sqlite3 >/dev/null 2>&1; then
+  . /usr/local/tunnel/lib/database
+  db_init
+fi
+
+echo "Struktur Tunnel Enterprise berhasil dipasang"

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/database
+
+require_root
+db_init
+mkdir -p /etc/sing-box /etc/tunnel/runtime/sing-box
+
+python3 /usr/local/tunnel/core/sing-box/render-sing-box-json.py \
+  --db "$TUNNEL_DB" \
+  --output /etc/tunnel/runtime/sing-box/config.json
+
+jq empty /etc/tunnel/runtime/sing-box/config.json
+if command -v sing-box >/dev/null 2>&1; then
+  sing-box check -c /etc/tunnel/runtime/sing-box/config.json
+fi
+
+if [ -f /etc/sing-box/config.json ]; then
+  cp -a /etc/sing-box/config.json "/etc/tunnel/runtime/sing-box/config.json.$(date +%Y%m%d-%H%M%S).bak"
+fi
+
+install -m 0644 /etc/tunnel/runtime/sing-box/config.json /etc/sing-box/config.json
+
+if systemctl list-unit-files sing-box.service >/dev/null 2>&1; then
+  systemctl restart sing-box || true
+fi
+
+print_ok "Config Sing-box diterapkan"

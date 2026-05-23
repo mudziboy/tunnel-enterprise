@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+/usr/local/tunnel/core/xray/render-xray-config shadowsocks

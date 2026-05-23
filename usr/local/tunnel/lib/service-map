@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[ -f /etc/tunnel/ports.env ] && . /etc/tunnel/ports.env || true
+[ -f /etc/tunnel/service-map.env ] && . /etc/tunnel/service-map.env || true
+service_has_unit(){ local svc="$1"; systemctl list-unit-files "$svc.service" >/dev/null 2>&1 || systemctl cat "$svc" >/dev/null 2>&1 || systemctl status "$svc" >/dev/null 2>&1; }
+service_active(){ systemctl is-active --quiet "$1" 2>/dev/null; }
+has_bin(){ command -v "$1" >/dev/null 2>&1 || [ -x "/usr/local/bin/$1" ] || [ -x "/usr/bin/$1" ]; }
+port_listen_tcp(){ local p="$1"; [ -n "$p" ] || return 1; ss -lntup 2>/dev/null | awk '{print $5}' | grep -Eq "(^|:)$p$|:$p$"; }
+port_listen_udp(){ local p="$1"; [ -n "$p" ] || return 1; ss -lnuup 2>/dev/null | awk '{print $5}' | grep -Eq "(^|:)$p$|:$p$"; }
+first_port(){ echo "${1:-}" | sed 's/,.*//;s/-.*//'; }
+svc_state(){
+  local svc="$1" bin="${2:-}" port="${3:-}" proto="${4:-tcp}"
+  if service_has_unit "$svc"; then
+    service_active "$svc" || { echo OFF; return; }
+    [ -z "$port" ] && { echo ON; return; }
+    if [ "$proto" = udp ]; then port_listen_udp "$port" && echo ON || echo OFF; else port_listen_tcp "$port" && echo ON || echo OFF; fi
+  elif [ -n "$bin" ] && has_bin "$bin"; then echo OFF; else echo OFF; fi
+}
+api_state(){
+  local p="${TUNNEL_API_PORT:-5889}"
+  if service_active "${API_SERVICE:-tunnel-api}"; then echo ON; return; fi
+  if command -v pm2 >/dev/null 2>&1 && pm2 describe tunnel-api 2>/dev/null | grep -qiE 'online|status.*online'; then echo ON; return; fi
+  port_listen_tcp "$p" && echo ON || echo OFF
+}
+ws_state(){ service_active "${WS_PROXY_SERVICE:-tunnel-ws-proxy}" && { echo ON; return; }; port_listen_tcp "${WS_PROXY_PORT:-8880}" && echo ON || echo OFF; }
+xray_state(){ service_active "${XRAY_SERVICE:-xray}" && { echo ON; return; }; for s in vmess@config vless@config trojan@config shadowsocks@config; do service_active "$s" && { echo ON; return; }; done; echo OFF; }
+xray_proto_state(){
+  local p="$1" ws_port grpc_port
+  case "$p" in
+    vless) ws_port="${XRAY_VLESS_WS_PORT:-10001}"; grpc_port="${XRAY_VLESS_GRPC_PORT:-10005}";;
+    vmess) ws_port="${XRAY_VMESS_WS_PORT:-10002}"; grpc_port="${XRAY_VMESS_GRPC_PORT:-10006}";;
+    trojan) ws_port="${XRAY_TROJAN_WS_PORT:-10003}"; grpc_port="${XRAY_TROJAN_GRPC_PORT:-10007}";;
+    shadowsocks) ws_port="${XRAY_SHADOWSOCKS_WS_PORT:-10004}"; grpc_port="${XRAY_SHADOWSOCKS_GRPC_PORT:-10008}";;
+    *) echo OFF; return;;
+  esac
+  service_active "$p@config" && { echo ON; return; }
+  service_active "${XRAY_SERVICE:-xray}" && { port_listen_tcp "$ws_port" || port_listen_tcp "$grpc_port"; } && echo ON || echo OFF
+}
+service_status_value(){
+  case "$1" in
+    SSH) svc_state "${SSH_SERVICE:-ssh}" sshd "${SSH_PORT:-22}" tcp ;;
+    DROPBEAR) svc_state "${DROPBEAR_SERVICE:-dropbear}" dropbear "$(first_port "${DROPBEAR_PORTS:-109,143}")" tcp ;;
+    NGINX) svc_state "${NGINX_SERVICE:-nginx}" nginx "${HTTP_PORT:-80}" tcp ;;
+    HAPROXY) svc_state "${HAPROXY_SERVICE:-haproxy}" haproxy "${HTTPS_PORT:-443}" tcp ;;
+    WS-PROXY) ws_state ;;
+    API) api_state ;;
+    XRAY) xray_state ;;
+    ZIVPN) svc_state "${ZIVPN_SERVICE:-zivpn}" zivpn "$(first_port "${ZIVPN_PORTS:-6000-10008}")" udp ;;
+    SINGBOX) svc_state "${SINGBOX_SERVICE:-sing-box}" sing-box "${SINGBOX_PORT:-2083}" tcp ;;
+    HYSTERIA2) svc_state "${HYSTERIA2_SERVICE:-hysteria2}" hysteria "${HYSTERIA2_PORT:-36712}" udp ;;
+    TUIC) svc_state "${TUIC_SERVICE:-tuic}" tuic "${TUIC_PORT:-36713}" udp ;;
+    WIREGUARD) svc_state "${WIREGUARD_SERVICE:-wg-quick@wg0}" wg "${WIREGUARD_PORT:-51820}" udp ;;
+    *) echo OFF ;;
+  esac
+}
+service_unit_name(){
+  case "$1" in
+    ssh|SSH) echo "${SSH_SERVICE:-ssh}";; dropbear|DROPBEAR) echo "${DROPBEAR_SERVICE:-dropbear}";; nginx|NGINX) echo "${NGINX_SERVICE:-nginx}";; haproxy|HAPROXY) echo "${HAPROXY_SERVICE:-haproxy}";; ws-proxy|WS-PROXY) echo "${WS_PROXY_SERVICE:-tunnel-ws-proxy}";; api|API) echo "${API_SERVICE:-tunnel-api}";; xray|XRAY) echo "${XRAY_SERVICE:-xray}";; zivpn|ZIVPN) echo "${ZIVPN_SERVICE:-zivpn}";; singbox|SINGBOX|sing-box) echo "${SINGBOX_SERVICE:-sing-box}";; hysteria2|HYSTERIA2) echo "${HYSTERIA2_SERVICE:-hysteria2}";; tuic|TUIC) echo "${TUIC_SERVICE:-tuic}";; wireguard|WIREGUARD) echo "${WIREGUARD_SERVICE:-wg-quick@wg0}";; *) echo "$1";;
+  esac
+}
+service_list(){ echo "SSH DROPBEAR NGINX HAPROXY WS-PROXY API XRAY ZIVPN SINGBOX HYSTERIA2 TUIC WIREGUARD"; }

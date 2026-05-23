@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common
+require_root
+mkdir -p /etc/tunnel
+current="$(cat /etc/tunnel/domain 2>/dev/null | tr -d ' \t\r\n' || true)"
+ip="$(curl -4s --max-time 5 ipv4.icanhazip.com 2>/dev/null | tr -d ' \t\r\n' || true)"
+if [ -n "$current" ] && [ "$current" != "-" ]; then echo "Domain sudah diset: $current"; exit 0; fi
+if [ -n "${TUNNEL_DOMAIN:-}" ]; then domain="$TUNNEL_DOMAIN"; else
+  echo; echo "Masukkan DOMAIN server untuk host akun."; echo "Contoh: nirankara.my.id"; echo "Kosongkan jika ingin memakai IP VPS: ${ip:-unknown}"; read -rp "DOMAIN SERVER: " domain
+fi
+[ -n "$domain" ] || domain="$ip"
+printf '%s\n' "$domain" > /etc/tunnel/domain
+chmod 644 /etc/tunnel/domain
+print_ok "Domain disimpan: $domain"

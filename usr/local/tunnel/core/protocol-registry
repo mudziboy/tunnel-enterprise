@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+REGISTRY="/etc/tunnel/protocols.json"
+PACKAGES="/etc/tunnel/packages.json"
+cmd="${1:-list}"
+case "$cmd" in
+  list)
+    jq -r '.protocols | to_entries[] | [.key,.value.engine,.value.title,.value.enabled] | @tsv' "$REGISTRY" 2>/dev/null || cat "$REGISTRY"
+    ;;
+  json)
+    cat "$REGISTRY"
+    ;;
+  packages)
+    cat "$PACKAGES"
+    ;;
+  exists)
+    proto="${2:-}"
+    jq -e --arg p "$proto" '.protocols[$p] != null and (.protocols[$p].enabled != false)' "$REGISTRY" >/dev/null 2>&1
+    ;;
+  title)
+    proto="${2:-}"
+    jq -r --arg p "$proto" '.protocols[$p].title // $p' "$REGISTRY"
+    ;;
+  engine)
+    proto="${2:-}"
+    jq -r --arg p "$proto" '.protocols[$p].engine // "unknown"' "$REGISTRY"
+    ;;
+  *)
+    echo "Usage: protocol-registry {list|json|packages|exists <protocol>|title <protocol>|engine <protocol>}" >&2
+    exit 1
+    ;;
+esac

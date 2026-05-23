@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+create_account() {
+  read -rp "Username : " user
+  read -rp "Password kosong=auto : " pass
+  read -rp "Expired days [30] : " days; days="${days:-30}"
+  read -rp "Quota GB [0] : " quota; quota="${quota:-0}"
+  read -rp "Limit IP [1] : " ip; ip="${ip:-1}"
+  proto="hysteria2"
+  if [ "hysteria2" = "singbox_vless_ws" ]; then
+    echo "1. Sing-box VLess WS"
+    echo "2. Sing-box Trojan WS"
+    echo "3. Sing-box Hysteria2"
+    echo "4. Sing-box TUIC"
+    read -rp "Pilih protocol sing-box [1] : " s
+    case "$s" in 2) proto="singbox_trojan_ws";; 3) proto="singbox_hysteria2";; 4) proto="singbox_tuic";; *) proto="singbox_vless_ws";; esac
+  fi
+  payload=$(python3 - "$user" "$pass" "$proto" "$days" "$quota" "$ip" <<'PY'
+import json,sys
+u,p,proto,days,quota,ip=sys.argv[1:]
+print(json.dumps({"username":u,"password":p,"protocols":[proto],"expired_days":int(days),"quota_gb":int(quota),"ip_limit":int(ip)}))
+PY
+)
+  /usr/local/tunnel/core/protocol-dispatcher create "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("message",""))'
+}
+while true; do
+  clear
+  echo "HYSTERIA2 MANAGER"
+  echo "1. Install Service"
+  echo "2. Create Account"
+  echo "3. List Accounts"
+  echo "4. Validate Config"
+  echo "5. Restart Service"
+  echo "6. Status Service"
+  echo "7. Back"
+  read -rp "Pilih menu: " opt
+  case "$opt" in
+    1) /usr/local/tunnel/core/hysteria2/install-hysteria2 ;;
+    2) create_account ;;
+    3) sqlite3 -header -column /etc/tunnel/tunnel.db "SELECT username,protocol,expired_at,status FROM accounts WHERE transport='hysteria2' OR protocol LIKE '%hysteria2%' ORDER BY username;" ;;
+    4) /usr/local/tunnel/tools/config-validator hysteria2 || true ;;
+    5) systemctl restart hysteria2 || true ;;
+    6) systemctl status hysteria2 --no-pager || true ;;
+    7) exit 0 ;;
+    *) echo "Pilihan tidak valid" ;;
+  esac
+  read -rp "Enter untuk kembali..." _
+done

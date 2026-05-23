@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/whitelist
+. /usr/local/tunnel/lib/ui
+load_tunnel_config
+whitelist_require "menu"
+while true; do
+  ui_header
+  ui_box_title "CYBER ENTERPRISE CONTROL PANEL"
+  echo -e "${ui_cyan}[1]${ui_white} SSH / OPENVPN             ${ui_cyan}[9]${ui_white} INSTALL PROFILE${ui_reset}"
+  echo -e "${ui_cyan}[2]${ui_white} XRAY MANAGER              ${ui_cyan}[10]${ui_white} WHITELIST STATUS${ui_reset}"
+  echo -e "${ui_cyan}[3]${ui_white} ZIVPN MANAGER             ${ui_cyan}[11]${ui_white} ACCOUNT DATABASE${ui_reset}"
+  echo -e "${ui_cyan}[4]${ui_white} MODERN CORE               ${ui_cyan}[12]${ui_white} SSH/VPN DIAGNOSE${ui_reset}"
+  echo -e "${ui_cyan}[5]${ui_white} API MANAGER               ${ui_cyan}[13]${ui_white} NODE AGENT STATUS${ui_reset}"
+  echo -e "${ui_cyan}[6]${ui_white} DIAGNOSTIC CENTER         ${ui_cyan}[14]${ui_white} NETWORK OPTIMIZER / BBR${ui_reset}"
+  echo -e "${ui_cyan}[7]${ui_white} BACKUP / RESTORE          ${ui_cyan}[15]${ui_white} SERVICE DOCTOR${ui_reset}"
+  echo -e "${ui_cyan}[8]${ui_white} SECURITY CENTER           ${ui_cyan}[16]${ui_white} SAFE RELOAD${ui_reset}"
+  echo -e "${ui_red}[X]${ui_white} EXIT${ui_reset}"
+  ui_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in
+    1) /usr/local/tunnel/menu/ssh-menu ;;
+    2) /usr/local/tunnel/menu/xray-menu ;;
+    3) /usr/local/tunnel/menu/zivpn-menu ;;
+    4) /usr/local/tunnel/menu/modern-core-menu ;;
+    5) /usr/local/tunnel/menu/api-menu ;;
+    6) /usr/local/tunnel/menu/diagnostic-menu ;;
+    7) /usr/local/tunnel/menu/backup-menu ;;
+    8) /usr/local/tunnel/menu/security-menu ;;
+    9) /usr/local/tunnel/bin/install-profile ; ui_wait ;;
+    10) /usr/local/tunnel/tools/whitelist-info; ui_wait ;;
+    11) /usr/local/tunnel/account/list-account; ui_wait ;;
+    12) /usr/local/tunnel/tools/ssh-vpn-diagnose; ui_wait ;;
+    13) /usr/local/tunnel/node/node-status | jq . 2>/dev/null || /usr/local/tunnel/node/node-status; ui_wait ;;
+    14) /usr/local/tunnel/tools/network-optimizer; ui_wait ;;
+    15) /usr/local/tunnel/tools/service-doctor; ui_wait ;;
+    16) read -rp "Service yang akan reload: " svc; /usr/local/tunnel/tools/safe-reload "$svc"; ui_wait ;;
+    x|X) exit 0 ;;
+    *) ui_warn "Pilihan tidak valid"; sleep 1 ;;
+  esac
+done

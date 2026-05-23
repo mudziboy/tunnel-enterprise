@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/validation
+
+require_root
+load_tunnel_config
+
+while true; do
+  clear
+  current="$(get_domain || true)"
+  echo "Domain Manager"
+  echo "=============="
+  echo "Domain saat ini: ${current:-belum diset}"
+  echo "1. Set Domain"
+  echo "2. Check DNS"
+  echo "3. Rebuild HAProxy Certificate"
+  echo "4. Render HAProxy Config"
+  echo "5. Back"
+  read -rp "Pilih menu: " opt
+
+  case "$opt" in
+    1)
+      read -rp "Masukkan domain: " domain
+      if ! is_valid_domain "$domain"; then
+        print_err "Domain tidak valid"
+      else
+        set_domain "$domain"
+        print_ok "Domain disimpan: $domain"
+      fi
+      ;;
+    2)
+      domain="$(get_domain || true)"
+      if [ -z "$domain" ]; then
+        print_err "Domain belum diset"
+      else
+        echo "A record:"
+        getent ahostsv4 "$domain" || true
+        echo ""
+        echo "Public IP:"
+        curl -4s ipv4.icanhazip.com || true
+      fi
+      ;;
+    3)
+      /usr/local/tunnel/proxy/haproxy/prepare-haproxy-cert
+      ;;
+    4)
+      /usr/local/tunnel/proxy/haproxy/render-haproxy-config
+      ;;
+    5)
+      exit 0
+      ;;
+    *)
+      print_err "Pilihan tidak valid"
+      ;;
+  esac
+  read -rp "Enter untuk kembali..." _
+done

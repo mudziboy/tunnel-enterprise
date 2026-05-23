@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+while true; do
+  clear
+  echo "OpenVPN Manager"
+  echo "1. Install OpenVPN Base"
+  echo "2. Status OpenVPN TCP"
+  echo "3. Status OpenVPN UDP"
+  echo "4. Restart OpenVPN"
+  echo "5. Back"
+  read -rp "Pilih menu: " opt
+  case "$opt" in
+    1) /usr/local/tunnel/core/openvpn/install-openvpn ;;
+    2) systemctl status openvpn-server@tunnel-tcp --no-pager ;;
+    3) systemctl status openvpn-server@tunnel-udp --no-pager ;;
+    4) systemctl restart openvpn-server@tunnel-tcp openvpn-server@tunnel-udp || true ;;
+    5) exit 0 ;;
+    *) echo "Pilihan tidak valid" ;;
+  esac
+  read -rp "Enter untuk kembali..." _
+done

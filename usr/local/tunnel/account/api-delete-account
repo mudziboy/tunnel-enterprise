@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+protocol="$1"
+username="$2"
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+require_valid_protocol "$protocol"
+require_valid_username "$username"
+
+if ! db_account_exists "$username" "$protocol"; then
+  echo "Account not found"
+  exit 1
+fi
+
+account_id="$(db_account_id "$username" "$protocol")"
+db_log_event "$account_id" "$username" "$protocol" "api-delete" ""
+db_delete_account "$username" "$protocol"
+audit_log "api" "delete-account" "$username/$protocol" "-"
+
+case "$protocol" in
+  vmess|vless|trojan|shadowsocks) /usr/local/tunnel/core/xray/render-xray-config "$protocol" ;;
+  zivpn) /usr/local/tunnel/core/zivpn/render-zivpn-config ;;
+  sing-box) /usr/local/tunnel/core/sing-box/render-sing-box-config ;;
+  hysteria2) /usr/local/tunnel/core/hysteria2/render-hysteria2-config ;;
+  tuic) /usr/local/tunnel/core/tuic/render-tuic-config ;;
+  wireguard) /usr/local/tunnel/core/wireguard/render-wireguard-config ;;
+esac
+
+echo "Account deleted"

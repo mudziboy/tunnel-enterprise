@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/common
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/ports
+
+load_tunnel_config
+
+report="/etc/tunnel/runtime/diagnostic-$(date +%Y%m%d-%H%M%S).txt"
+mkdir -p /etc/tunnel/runtime
+
+{
+  echo "Tunnel Enterprise Diagnostic"
+  echo "Generated: $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "Hostname: $(hostname)"
+  echo "Kernel: $(uname -a)"
+  echo ""
+  echo "Domain"
+  echo "======"
+  get_domain || true
+  echo ""
+  echo "Public IP"
+  echo "========="
+  curl -4s --max-time 5 https://ipv4.icanhazip.com || true
+  echo ""
+  echo "Data Center"
+  echo "==========="
+  curl -fsS --max-time 5 "https://ipinfo.io/$(curl -4s --max-time 3 https://ipv4.icanhazip.com | tr -d ' \t\r\n')/json" 2>/dev/null || true
+  echo ""
+  echo "Port Map"
+  echo "========"
+  show_port_map
+  echo ""
+  echo "Dependency"
+  echo "=========="
+  /usr/local/tunnel/tools/check-dependencies 2>/dev/null || true
+  echo ""
+  echo "Service Health"
+  echo "=============="
+  /usr/local/tunnel/tools/health-check 2>/dev/null || true
+  echo ""
+  echo "Tunnel Guard"
+  echo "============"
+  systemctl status tunnel-guard.timer tunnel-guard.service --no-pager 2>/dev/null || true
+  tail -n 80 /usr/local/tunnel/logs/tunnel-guard.log 2>/dev/null || true
+  echo ""
+  echo "HAProxy Config"
+  echo "=============="
+  haproxy -c -f /etc/haproxy/haproxy.cfg 2>&1 || true
+  echo ""
+  echo "Nginx Config"
+  echo "============"
+  nginx -t 2>&1 || true
+  echo ""
+  echo "Xray Config Test"
+  echo "================"
+  for f in /etc/xray/*/config.json; do
+    [ -f "$f" ] || continue
+    echo "$f"
+    xray run -test -config "$f" 2>&1 || true
+  done
+  echo ""
+  echo "Listening TCP"
+  echo "============="
+  ss -lntup 2>/dev/null || true
+  echo ""
+  echo "Listening UDP"
+  echo "============="
+  ss -lnuup 2>/dev/null || true
+  echo ""
+  echo "Firewall Filter"
+  echo "==============="
+  iptables -S 2>/dev/null || true
+  echo ""
+  echo "Firewall NAT"
+  echo "============"
+  iptables -t nat -S 2>/dev/null || true
+  echo ""
+  echo "Failed Services"
+  echo "==============="
+  systemctl --failed --no-pager 2>/dev/null || true
+  echo ""
+  echo "Disk"
+  echo "===="
+  df -h 2>/dev/null || true
+  echo ""
+  echo "Memory"
+  echo "======"
+  free -h 2>/dev/null || true
+} > "$report"
+
+cat "$report"
+print_ok "Report tersimpan di $report"

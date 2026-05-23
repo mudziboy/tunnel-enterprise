@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+
+while true; do
+  ui_header
+  ui_box_title "SECURITY / FIREWALL / WHITELIST CENTER"
+  echo -e "${ui_red}[1]${ui_white} FIREWALL MANAGER        ${ui_blue}[7]${ui_white} WHITELIST CHECK${ui_reset}"
+  echo -e "${ui_yellow}[2]${ui_white} SSL MANAGER             ${ui_blue}[8]${ui_white} WHITELIST INFO${ui_reset}"
+  echo -e "${ui_green}[3]${ui_white} DOMAIN MANAGER          ${ui_pink}[9]${ui_white} INSTALL HAPROXY${ui_reset}"
+  echo -e "${ui_cyan}[4]${ui_white} SECURITY HARDENING      ${ui_pink}[10]${ui_white} INSTALL NGINX${ui_reset}"
+  echo -e "${ui_pink}[5]${ui_white} AUDIT LOG               ${ui_gold}[11]${ui_white} RENDER HAPROXY${ui_reset}"
+  echo -e "${ui_blue}[6]${ui_white} CLEAR LOGS              ${ui_gold}[12]${ui_white} RENDER NGINX${ui_reset}"
+  echo -e "${ui_red}[X]${ui_white} BACK${ui_reset}"
+  ui_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in
+    1) /usr/local/tunnel/tools/firewall ;;
+    2) /usr/local/tunnel/tools/ssl-manager ;;
+    3) /usr/local/tunnel/tools/domain-manager ;;
+    4) /usr/local/tunnel/tools/security-hardening ;;
+    5) /usr/local/tunnel/tools/audit-log ;;
+    6) /usr/local/tunnel/tools/clear-log ;;
+    7) /usr/local/tunnel/tools/whitelist-check ;;
+    8) /usr/local/tunnel/tools/whitelist-info ;;
+    9) /usr/local/tunnel/proxy/haproxy/install-haproxy ;;
+    10) /usr/local/tunnel/proxy/nginx/install-nginx ;;
+    11) /usr/local/tunnel/proxy/haproxy/render-haproxy-config ;;
+    12) /usr/local/tunnel/proxy/nginx/render-nginx-config ;;
+    x|X) exit 0 ;;
+    *) echo "Pilihan tidak valid" ;;
+  esac
+  ui_wait
+done

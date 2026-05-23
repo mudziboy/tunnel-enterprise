@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/database
+TUNNEL_DB="${TUNNEL_DB:-/etc/tunnel/tunnel.db}"
+esc(){ db_escape "$1"; }
+backend(){ sqlite3 "$TUNNEL_DB" "SELECT value FROM settings WHERE key='udp_accounting_backend';" 2>/dev/null || echo auto; }
+block_nft(){
+  local user="$1"
+  command -v nft >/dev/null 2>&1 || return 1
+  nft add table inet tunnelgo_abuse 2>/dev/null || true
+  nft 'add chain inet tunnelgo_abuse input { type filter hook input priority -100; policy accept; }' 2>/dev/null || true
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT start_port,end_port FROM udp_port_rules WHERE username='$(esc "$user")' AND status='active';" | while IFS='|' read -r start end; do
+    [ -n "$start" ] || continue
+    if [ "$start" = "$end" ]; then nft add rule inet tunnelgo_abuse input udp dport "$start" drop comment "tg_block_udp:$user" 2>/dev/null || true; else nft add rule inet tunnelgo_abuse input udp dport "$start-$end" drop comment "tg_block_udp:$user" 2>/dev/null || true; fi
+  done
+}
+block_iptables(){
+  local user="$1"
+  command -v iptables >/dev/null 2>&1 || return 1
+  iptables -N TUNNELGO_UDP_BLOCK 2>/dev/null || true
+  iptables -C INPUT -p udp -j TUNNELGO_UDP_BLOCK 2>/dev/null || iptables -I INPUT 1 -p udp -j TUNNELGO_UDP_BLOCK 2>/dev/null || true
+  sqlite3 -separator '|' "$TUNNEL_DB" "SELECT start_port,end_port FROM udp_port_rules WHERE username='$(esc "$user")' AND status='active';" | while IFS='|' read -r start end; do
+    [ -n "$start" ] || continue
+    if [ "$start" = "$end" ]; then iptables -A TUNNELGO_UDP_BLOCK -p udp --dport "$start" -m comment --comment "tg_block_udp:$user" -j DROP 2>/dev/null || true; else iptables -A TUNNELGO_UDP_BLOCK -p udp --dport "$start:$end" -m comment --comment "tg_block_udp:$user" -j DROP 2>/dev/null || true; fi
+  done
+}
+case "${1:-}" in
+  block)
+    user="${2:?username}"; db_init >/dev/null 2>&1
+    b="$(backend)"; [ "$b" = auto ] && b="$(/usr/local/tunnel/core/accounting-backend-detect 2>/dev/null || echo none)"
+    case "$b" in nft) block_nft "$user" ;; iptables) block_iptables "$user" ;; *) true ;; esac
+    sqlite3 "$TUNNEL_DB" "UPDATE udp_port_rules SET status='blocked',updated_at=CURRENT_TIMESTAMP WHERE username='$(esc "$user")'; INSERT INTO events(event,username,protocol,payload) VALUES('udp.blocked','$(esc "$user")','zivpn','{}');" >/dev/null 2>&1 || true
+    echo "blocked udp for $user"
+    ;;
+  unblock)
+    user="${2:?username}"; db_init >/dev/null 2>&1
+    sqlite3 "$TUNNEL_DB" "UPDATE udp_port_rules SET status='active',updated_at=CURRENT_TIMESTAMP WHERE username='$(esc "$user")'; INSERT INTO events(event,username,protocol,payload) VALUES('udp.unblocked','$(esc "$user")','zivpn','{}');" >/dev/null 2>&1 || true
+    /usr/local/tunnel/core/udp-accounting-rule-sync auto >/dev/null 2>&1 || true
+    echo "unblocked udp for $user"
+    ;;
+  *) echo "Usage: udp-enforcer block|unblock <username>"; exit 1 ;;
+esac

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+. /usr/local/tunnel/lib/account
+
+require_root
+account_init
+
+protocol="$(account_select_protocol)" || { print_err "Protocol tidak valid"; exit 1; }
+read -rp "Durasi menit: " minutes
+minutes="${minutes:-60}"
+[[ "$minutes" =~ ^[0-9]{1,5}$ ]] || { print_err "Durasi tidak valid"; exit 1; }
+
+username="trial-$(date +%H%M%S)"
+quota=0
+iplimit=1
+transport=""
+secret="$(account_random_secret)"
+expired="$(date -u '+%Y-%m-%d')"
+
+if account_dispatcher_exists trial "$protocol"; then
+  account_dispatch trial "$protocol" "$username" "$minutes" "$iplimit" "$secret"
+else
+  print_warn "Dispatcher protocol belum aktif. Data trial hanya disimpan ke database."
+fi
+
+db_add_account "$username" "$protocol" "$transport" "$secret" "$secret" "$quota" "$iplimit" "$expired" "trial" "duration_minutes=$minutes" "local"
+account_id="$(db_account_id "$username" "$protocol")"
+db_log_event "$account_id" "$username" "$protocol" "trial" "minutes=$minutes"
+audit_log "local" "trial-account" "$username/$protocol" "minutes=$minutes"
+
+print_ok "Trial dibuat"
+echo "Username: $username"
+echo "Protocol: $protocol"
+echo "Durasi  : $minutes menit"

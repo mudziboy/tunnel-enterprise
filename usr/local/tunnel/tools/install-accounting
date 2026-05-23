@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+mkdir -p /etc/systemd/system /usr/local/tunnel/logs
+if ! command -v nft >/dev/null 2>&1 && ! command -v iptables >/dev/null 2>&1; then
+  echo "nftables/iptables belum tersedia. Install salah satu terlebih dahulu."
+  exit 1
+fi
+/usr/local/tunnel/tools/db-init >/dev/null 2>&1 || true
+/usr/local/tunnel/core/accounting-rule-sync auto || true
+cat >/etc/systemd/system/tunnel-accounting.service <<'EOF'
+[Unit]
+Description=Tunnel Go Accounting Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/tunnel/core/accounting-collector --json
+EOF
+cat >/etc/systemd/system/tunnel-accounting.timer <<'EOF'
+[Unit]
+Description=Run Tunnel Go Accounting Collector every minute
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+AccuracySec=10
+Unit=tunnel-accounting.service
+
+[Install]
+WantedBy=timers.target
+EOF
+cat >/etc/systemd/system/tunnel-accounting-rules.service <<'EOF'
+[Unit]
+Description=Sync Tunnel Go Accounting Rules
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/tunnel/core/accounting-rule-sync auto
+EOF
+cat >/etc/systemd/system/tunnel-accounting-rules.timer <<'EOF'
+[Unit]
+Description=Sync Tunnel Go Accounting Rules periodically
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=300
+AccuracySec=20
+Unit=tunnel-accounting-rules.service
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now tunnel-accounting.timer >/dev/null 2>&1 || true
+systemctl enable --now tunnel-accounting-rules.timer >/dev/null 2>&1 || true
+echo "Tunnel Go accounting collector installed."

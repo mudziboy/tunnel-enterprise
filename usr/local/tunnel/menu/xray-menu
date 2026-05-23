@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. /usr/local/tunnel/lib/ui
+. /usr/local/tunnel/lib/account
+. /usr/local/tunnel/lib/config
+. /usr/local/tunnel/lib/service-map
+load_tunnel_config 2>/dev/null || true
+
+choose_xray_protocol(){
+  local opt
+  echo -e "${ui_cyan}PILIH PROTOCOL XRAY${ui_reset}"
+  echo -e "${ui_green}[1]${ui_white} VLESS       WS:${XRAY_VLESS_WS_PORT:-10001} GRPC:${XRAY_VLESS_GRPC_PORT:-10005} PATH:/vless SERVICE:vless-grpc${ui_reset}"
+  echo -e "${ui_green}[2]${ui_white} VMESS       WS:${XRAY_VMESS_WS_PORT:-10002} GRPC:${XRAY_VMESS_GRPC_PORT:-10006} PATH:/vmess SERVICE:vmess-grpc${ui_reset}"
+  echo -e "${ui_green}[3]${ui_white} TROJAN      WS:${XRAY_TROJAN_WS_PORT:-10003} GRPC:${XRAY_TROJAN_GRPC_PORT:-10007} PATH:/trojan-ws SERVICE:trojan-grpc${ui_reset}"
+  echo -e "${ui_green}[4]${ui_white} SHADOWSOCKS WS:${XRAY_SHADOWSOCKS_WS_PORT:-10004} GRPC:${XRAY_SHADOWSOCKS_GRPC_PORT:-10008} PATH:/ss-ws SERVICE:ss-grpc${ui_reset}"
+  echo -e "${ui_red}[X]${ui_white} BACK${ui_reset}"
+  read -rp "➤ Protocol : " opt
+  case "$opt" in
+    1|vless|VLESS) echo vless ;;
+    2|vmess|VMESS) echo vmess ;;
+    3|trojan|TROJAN) echo trojan ;;
+    4|ss|SS|shadowsocks|SHADOWSOCKS) echo shadowsocks ;;
+    x|X) return 1 ;;
+    *) ui_warn "Protocol tidak valid"; return 1 ;;
+  esac
+}
+
+show_xray_status(){
+  ui_sub_header "XRAY STATUS"
+  printf '%-14s %-5s %-10s %-10s %-14s %-16s\n' PROTOCOL STATE WS_PORT GRPC_PORT WS_PATH GRPC_SERVICE
+  for p in vless vmess trojan shadowsocks; do
+    case "$p" in
+      vless) ws=${XRAY_VLESS_WS_PORT:-10001}; grpc=${XRAY_VLESS_GRPC_PORT:-10005}; path=/vless; gs=vless-grpc;;
+      vmess) ws=${XRAY_VMESS_WS_PORT:-10002}; grpc=${XRAY_VMESS_GRPC_PORT:-10006}; path=/vmess; gs=vmess-grpc;;
+      trojan) ws=${XRAY_TROJAN_WS_PORT:-10003}; grpc=${XRAY_TROJAN_GRPC_PORT:-10007}; path=/trojan-ws; gs=trojan-grpc;;
+      shadowsocks) ws=${XRAY_SHADOWSOCKS_WS_PORT:-10004}; grpc=${XRAY_SHADOWSOCKS_GRPC_PORT:-10008}; path=/ss-ws; gs=ss-grpc;;
+    esac
+    state="$(xray_proto_state "$p" 2>/dev/null || echo OFF)"
+    printf '%-14s %-5s %-10s %-10s %-14s %-16s\n' "$p" "$state" "$ws" "$grpc" "$path" "$gs"
+  done
+  echo
+  systemctl --no-pager --plain status xray vmess@config vless@config trojan@config shadowsocks@config 2>/dev/null || true
+}
+
+compact_xray_status(){
+  printf '%-14s %-5s %-10s %-10s %-14s %-16s\n' PROTOCOL STATE WS_PORT GRPC_PORT WS_PATH GRPC_SERVICE
+  for p in vless vmess trojan shadowsocks; do
+    case "$p" in
+      vless) ws=${XRAY_VLESS_WS_PORT:-10001}; grpc=${XRAY_VLESS_GRPC_PORT:-10005}; path=/vless; gs=vless-grpc;;
+      vmess) ws=${XRAY_VMESS_WS_PORT:-10002}; grpc=${XRAY_VMESS_GRPC_PORT:-10006}; path=/vmess; gs=vmess-grpc;;
+      trojan) ws=${XRAY_TROJAN_WS_PORT:-10003}; grpc=${XRAY_TROJAN_GRPC_PORT:-10007}; path=/trojan-ws; gs=trojan-grpc;;
+      shadowsocks) ws=${XRAY_SHADOWSOCKS_WS_PORT:-10004}; grpc=${XRAY_SHADOWSOCKS_GRPC_PORT:-10008}; path=/ss-ws; gs=ss-grpc;;
+    esac
+    state="$(xray_proto_state "$p" 2>/dev/null || echo OFF)"
+    printf '%-14s %-5s %-10s %-10s %-14s %-16s\n' "$p" "$state" "$ws" "$grpc" "$path" "$gs"
+  done
+}
+
+run_protocol_action(){
+  local action="$1" proto script
+  proto="$(choose_xray_protocol)" || { ui_wait; return 0; }
+  case "$action" in
+    add) TUNNEL_PROTOCOL="$proto" /usr/local/tunnel/account/add-account "$proto" ;;
+    delete|renew|trial|check|limit)
+      script="/usr/local/tunnel/core/$proto/$action-$proto"
+      if [ -x "$script" ]; then "$script"; else TUNNEL_PROTOCOL="$proto" "/usr/local/tunnel/account/${action}-account" "$proto"; fi
+      ;;
+    detail) /usr/local/tunnel/account/detail-account "$proto" ;;
+    traffic) /usr/local/tunnel/account/traffic-account "$proto" ;;
+    render) /usr/local/tunnel/core/xray/render-xray-config "$proto" ;;
+    restart) systemctl restart "$proto@config" ;;
+  esac
+  ui_wait
+}
+
+while true; do
+  ui_sub_header "XRAY MANAGER"
+  compact_xray_status
+  echo
+  echo -e "${ui_green}[1]${ui_white} INSTALL XRAY CORE          ${ui_cyan}[9]${ui_white} DETAIL ACCOUNT${ui_reset}"
+  echo -e "${ui_green}[2]${ui_white} INSTALL SYSTEMD            ${ui_cyan}[10]${ui_white} LIMIT ACCOUNT${ui_reset}"
+  echo -e "${ui_green}[3]${ui_white} ADD ACCOUNT               ${ui_cyan}[11]${ui_white} TRAFFIC ACCOUNT${ui_reset}"
+  echo -e "${ui_green}[4]${ui_white} DELETE ACCOUNT            ${ui_cyan}[12]${ui_white} RENDER CONFIG BY PROTOCOL${ui_reset}"
+  echo -e "${ui_green}[5]${ui_white} RENEW ACCOUNT             ${ui_cyan}[13]${ui_white} RENDER ALL CONFIG${ui_reset}"
+  echo -e "${ui_green}[6]${ui_white} TRIAL ACCOUNT             ${ui_cyan}[14]${ui_white} XRAY FULL STATUS${ui_reset}"
+  echo -e "${ui_green}[7]${ui_white} CHECK ACCOUNT             ${ui_cyan}[15]${ui_white} RESTART BY PROTOCOL${ui_reset}"
+  echo -e "${ui_green}[8]${ui_white} LIST ACCOUNT              ${ui_cyan}[16]${ui_white} CONNECTION OPTIMIZER${ui_reset}"
+  echo -e "${ui_red}[X]${ui_white} BACK${ui_reset}"
+  ui_sub_footer
+  read -rp "➤ Select Menu : " opt
+  case "$opt" in
+    1) /usr/local/tunnel/core/xray/install-xray; ui_wait ;;
+    2) /usr/local/tunnel/core/xray/install-systemd; ui_wait ;;
+    3) run_protocol_action add ;;
+    4) run_protocol_action delete ;;
+    5) run_protocol_action renew ;;
+    6) run_protocol_action trial ;;
+    7) run_protocol_action check ;;
+    8) /usr/local/tunnel/account/list-account; ui_wait ;;
+    9) run_protocol_action detail ;;
+    10) run_protocol_action limit ;;
+    11) run_protocol_action traffic ;;
+    12) run_protocol_action render ;;
+    13) /usr/local/tunnel/core/xray/render-xray-config --all; ui_wait ;;
+    14) show_xray_status; ui_wait ;;
+    15) run_protocol_action restart ;;
+    16) /usr/local/tunnel/tools/connection-optimizer; ui_wait ;;
+    x|X) exit 0 ;;
+    *) ui_warn "Pilihan tidak valid"; sleep 1 ;;
+  esac
+done
